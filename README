@@ -124,34 +124,49 @@ relative path - rg looks for directories under USERNAME, ex:
 
 rg
 
+INITIALIZE
+global data directories
+temp directories
+
+
+SEARCH
 10. run global: find / -name "*.git" 1> tmp 2> /dev/null
 
+LABELING
 20. discover the labels and names of each
 /cygdrive/x/name, /home/name, /media/device/name, /mnt/device/name
 
+ABSTRACT
 30. order relative groups: for example
 alex/foo/bar /home       ananda
 alex/foo/bar /media/Baz  Baz
 alex/foo/bar /cygdrive/c charlie
 alex/foo/bar /mnt/Dave   Dave
 
+STATUS
 40. investigate status of each relative group
   c  alex/foo/bar 13:8a22d3d:7
 a    alex/foo/bar 12:d8ad232:2
  B D alex/foo/bar 11:a3cda22:0
 
+PRINT
 50. print all in group if verbose or if any are different or unclean
 
+SYNCHRONIZE
 60. synchronize all cleans to latest
   c  alex/foo/bar 13:8a22d3d:7
  B D alex/foo/bar 13:8a22d3d:0
 a    alex/foo/bar 12:d8ad232:2
 
+UPDATE
 70. update global data
   c     alex/foo/bar 13:8a22d3d:7
  B De G alex/foo/bar 13:8a22d3d:0
 a       alex/foo/bar 12:d8ad232:2
      f  alex/foo/bar 12:d8ad232:0
 
+LIST
+80. print the whole global list
 
-.rg/tmp132/
+CLEANUP
+90. remove temp files
