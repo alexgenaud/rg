@@ -17,40 +17,37 @@
 # These rights, on this notice, rely.
 #
 ###################################################
-
-
-runtime_error() {
-  echo error: $1
-  exit 1
-}
-
 get_arg() {
-  if [ $# -ne 1 ]; then runtime_error "get_arg wrong arg num"; fi
   if [ `echo "${1}_"|sed "s:^\(.\).*:\1:g"` = "-" ]; then
+    if [ `echo "$1"|grep d|wc -l` = "1" ]; then DRYRUN=YES  ; fi
     if [ `echo "$1"|grep v|wc -l` = "1" ]; then VERBOSE=YES ; fi
     if [ `echo "$1"|grep l|wc -l` = "1" ]; then LIST=YES    ; fi
+    if [ `echo "$1"|grep q|wc -l` = "1" ]; then QUIET=YES   ; fi
   elif [ "$ARG1" = "NO" ]; then ARG1="$1"
   elif [ "$ARG2" = "NO" ]; then ARG2="$1"
   elif [ "$ARG3" = "NO" ]; then ARG3="$1"
   fi
 }
 
+DRYRUN=NO
+VERBOSE=NO
+QUIET=NO
+LIST=NO
+ARG1=NO
+ARG2=NO
+ARG3=NO
+
+if [ $# -ge 1 ]; then get_arg "$1" ; fi
+if [ $# -ge 2 ]; then get_arg "$2" ; fi
+if [ $# -ge 3 ]; then get_arg "$3" ; fi
+if [ $# -ge 4 ]; then get_arg "$4" ; fi
+
 initialize() {
-  VERBOSE=NO
-  LIST=NO
-  ARG1=NO
-  ARG2=NO
-  ARG3=NO
   DATADIR="${HOME}/.rg/data"
   TEMPDIR="${HOME}/.rg/tmp/$$"
-
-  if [ $# -ge 1 ]; then get_arg "$1" ; fi
-  if [ $# -ge 2 ]; then get_arg "$2" ; fi
-  if [ $# -ge 3 ]; then get_arg "$3" ; fi
-  if [ $# -ge 4 ]; then get_arg "$4" ; fi
-
+  TEMPDATA="${TEMPDIR}/data"
   mkdir -p "${DATADIR}"
-  mkdir -p "${TEMPDIR}/data"
+  mkdir -p "${TEMPDATA}"
 }
 
 search_repos() {
@@ -105,6 +102,8 @@ label_devices() {
       echo "${LABEL}:${device}" >> "${TEMPDIR}/labels"
     fi
   done < "${TEMPDIR}/devices"
+  sort "${TEMPDIR}/labels" | uniq > "${TEMPDIR}/tmp" 
+  mv "${TEMPDIR}/tmp" "${TEMPDIR}/labels"
 }
 
 _digits7() {
@@ -112,7 +111,7 @@ _digits7() {
 }
 
 
-summarize_repo() {
+summarize_one_repo() {
   FULLPATH=$1
   TYPE=$2
   ABSTRACT=$3
@@ -149,228 +148,285 @@ summarize_repo() {
   RET="${ABSTRACT}:${NUMLOG}:${NUMSTAT}:${LOGHASH}:${LABEL}:${TYPE}:${LOGTEXT}"
 }
 
-compare_repos() {
-  SYNC=NO
-  SAVE=NO
-  PRINT=YES
+summarize_similar_repos() {
+  repo="$1"
+  SHOWSYNC="$2"
 
-  TEMPLINE=${TEMPDIR}/tmprepo
+  ABBREV_LINE=""
+
+  #
+  # for each label:device
+  #
+  while read dev; do
+    LABEL=`echo $dev|cut -d: -f1`
+    DEVICE=`echo $dev|cut -d: -f2`
+    ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
+    FULLPATH=
+    TYPE=
+    if [ -d "${DEVICE}/${repo}" ]; then
+      FULLPATH="${DEVICE}/${repo}"
+      TYPE=WORK
+      ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
+    elif [ -d "${DEVICE}/${repo}.git" ]; then
+      FULLPATH="${DEVICE}/${repo}.git"
+      TYPE=BARE
+      ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
+    else
+      # this device does not have this repository
+      # add a blank space to the abbreviation line
+      ABBREV_LINE="${ABBREV_LINE} "
+      continue
+    fi
+
+    summarize_one_repo "$FULLPATH" "$TYPE" "$repo" "$LABEL"
+    echo "$RET" > "${TEMPLINEDATA}/${LABEL}"
+    # alex/cool:0000013:0000007:a1bc13d:alice
+
+    NUMLOG=`echo $RET|cut -d: -f2`
+    NUMSTAT=`echo $RET|cut -d: -f3`
+    HASH=`echo $RET|cut -d: -f4`
+    echo "${NUMLOG}:${NUMSTAT}:${TYPE}:${FULLPATH}" >> "${TEMPLINE}/rankindiv"
+
+    RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${HASH}_${NUMSTAT}"
+    if [ -r "$RANKFILE" ]; then
+      echo `head -1 "$RANKFILE"`,$ABBREV > "$RANKFILE"
+    else
+      NUMLOG=`echo $NUMLOG|sed "s:^0*::"`
+      if [ "_$NUMLOG" = "_" ]; then NUMLOG=0; fi
+      NUMSTAT=`echo $NUMSTAT|sed "s:^0*::"`
+      if [ "_$NUMSTAT" = "_" ]; then NUMSTAT=0; fi
+      echo "${NUMLOG}:${NUMSTAT}:${ABBREV}" > "$RANKFILE"
+    fi
+
+  done < "${TEMPDIR}/labels"
+
+  FIRST=YES
+  RET="${ABBREV_LINE}"
+  if [ "_$SHOWSYNC" = "_SYNC" ]; then
+    RET=`echo $RET|sed "s:.:=:g"`
+  fi
+  for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
+    FILE=`cat "$file"`
+    if [ "$FIRST" = "YES" ]; then
+      RET="${RET} ${repo} ${FILE}"
+      FIRST=NO
+    else
+      RET="${RET} > ${FILE}"
+    fi
+  done
+
+  # return RET
+}
+
+summarize_precomputed_repos() {
+  repo="$1"
+
+  ABBREV_LINE=""
+
+  #
+  # for each label
+  #
+  while read dev; do
+    LABEL=`echo $dev|cut -d: -f1`
+    ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
+    
+    #bin.bak.work:0000004:0000000:21dc865:ARCH_201311:WORK:search, index, label, not yet compare
+    LINE=`grep "^${repo}:" "${DATADIR}/$LABEL"`
+
+    if [ "_`echo $LINE|wc -c`" != "_1" ]; then
+      ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
+    else
+      # add a blank space to the abbreviation line
+      ABBREV_LINE="${ABBREV_LINE} "
+      continue
+    fi
+
+    NUMLOG=`echo $LINE|cut -d: -f2`
+    NUMSTAT=`echo $LINE|cut -d: -f3`
+    HASH=`echo $LINE|cut -d: -f4`
+
+    RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${HASH}_${NUMSTAT}"
+    if [ -r "$RANKFILE" ]; then
+      echo `head -1 "$RANKFILE"`,$ABBREV > "$RANKFILE"
+    else
+      NUMLOG=`echo $NUMLOG|sed "s:^0*::"`
+      if [ "_$NUMLOG" = "_" ]; then NUMLOG=0; fi
+      NUMSTAT=`echo $NUMSTAT|sed "s:^0*::"`
+      if [ "_$NUMSTAT" = "_" ]; then NUMSTAT=0; fi
+      echo "${NUMLOG}:${NUMSTAT}:${ABBREV}" > "$RANKFILE"
+    fi
+
+  done < "${TEMPDIR}/labels"
+
+  FIRST=YES
+  RET="${ABBREV_LINE}"
+  for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
+    FILE=`cat "$file"`
+    if [ "$FIRST" = "YES" ]; then
+      RET="${RET} ${repo} ${FILE}"
+      FIRST=NO
+    else
+      RET="${RET} > ${FILE}"
+    fi
+  done
+
+  # return RET
+}
+
+##################################################
+#
+# synchronize_similar_repos
+#
+# returns RET [ NONE | SYNC ]
+#    NONE means no change, no synchronization
+#    SYNC means at least one repo was updated
+#
+##################################################
+synchronize_similar_repos() {
+  SYNC_ORIGDIR="${PWD}"
+  LATEST=YES
+
+  # 0000004:0000001:WORK:/home/alex/.rg/bin
+  sort -r "${TEMPLINE}/rankindiv" > "${TEMPLINE}/sort"
+  while read RANK; do
+    LOGNUM=`echo $RANK|cut -d: -f1|sed "s:^0*::"`
+    if [ "_$LOGNUM" = "_" ]; then LOGNUM=0; fi
+
+    STATNUM=`echo $RANK|cut -d: -f2|sed "s:^0*::"`
+    if [ "_$STATNUM" = "_" ]; then STATNUM=0; fi
+
+    TYPE=`echo $RANK|cut -d: -f3`
+    FULLPATH=`echo $RANK|cut -d: -f4`
+
+    if [ "$LATEST" = "YES" ]; then
+      LATEST_LOGNUM=$LOGNUM
+      LATEST_TYPE=$TYPE
+      LATEST_FULLPATH=$FULLPATH
+      LATEST=NO
+      continue
+    elif [ "_$STATNUM" != "_0" \
+      -o "_$LOGNUM" = "_$LATEST_LOGNUM" ]; then
+      # can only fast forward a clean repo
+      # and dont bother synching already synched
+      continue
+    elif [ "_$TYPE" = "_WORK" ]; then
+      # then we have to pull
+      cd "$FULLPATH"
+      echo $FULLPATH pull from $LATEST_FULLPATH >> "${TEMPDIR}/gitstdout"
+      if [ "_$DRYRUN" = "_YES" ]; then
+        echo "    $FULLPATH" pull from "$LATEST_FULLPATH"
+      else
+        git pull "$LATEST_FULLPATH" master \
+          1>> "${TEMPDIR}/gitstdout" 2>> "${TEMPDIR}/gitstderr"
+      fi
+      RET="SYNC"
+    elif [ "_$TYPE" = "_BARE" ]; then
+      # then we have to push
+      cd "$LATEST_FULLPATH"
+      echo $LATEST_FULLPATH push to $FULLPATH >> "${TEMPDIR}/gitstdout"
+      if [ "_$DRYRUN" = "_YES" ]; then
+        echo "    $LATEST_FULLPATH" push to "$FULLPATH"
+      else
+        git push "$FULLPATH" master \
+          1>> "${TEMPDIR}/gitstdout" 2>> "${TEMPDIR}/gitstderr"
+      fi
+      RET="SYNC"
+    fi
+  done < "${TEMPLINE}/sort"
+  cd "${SYNC_ORIGDIR}"
+}
+
+compare_repos() {
+  VERBOSE=NO
+
+  TEMPLINE=${TEMPDIR}/line
+  TEMPLINEDATA=${TEMPDIR}/linedata
   while read repo; do
 
     #
     # test only 'rg' repos
     #
-    if [ "_`echo $repo|grep rg|wc -l`" != "_1" ]; then continue; fi
+    #if [ "_`echo $repo|grep rg|wc -l`" != "_1" ]; then continue; fi
 
 
     if [ -d "${TEMPLINE}" ]; then
-      rm -rf "${TEMPLINE}"/*
-    else
-      mkdir -p "${TEMPLINE}"
+         rm -rf "${TEMPLINE}"/*
+    else mkdir -p "${TEMPLINE}"
     fi
 
-    ABBREV_LINE=""
+    if [ -d "${TEMPLINEDATA}" ]; then
+         rm -rf "${TEMPLINEDATA}"/*
+    else mkdir -p "${TEMPLINEDATA}"
+    fi
 
-    while read dev; do
-      LABEL=`echo $dev|cut -d: -f1`
-      DEVICE=`echo $dev|cut -d: -f2`
-      ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
-      FULLPATH=
-      TYPE=
-      if [ -d "${DEVICE}/${repo}" ]; then
-        FULLPATH="${DEVICE}/${repo}"
-        TYPE=WORK
-        ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
-      elif [ -d "${DEVICE}/${repo}.git" ]; then
-        FULLPATH="${DEVICE}/${repo}.git"
-        TYPE=BARE
-        ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
-      else
-        # this device does not have this repository
-        # add a blank space to the abbreviation line
-        ABBREV_LINE="${ABBREV_LINE} "
-        continue
-      fi
+    summarize_similar_repos "$repo" "NoSync"
+    if [ "_$QUIET" = "_NO" ]; then echo "$RET"
+    else PREVLINE=$RET
+    fi
 
-      summarize_repo "$FULLPATH" "$TYPE" "$repo" "$LABEL"
-      #echo loulou  RET is $RET
-      # alex/cool:0000013:0000007:a1bc13d:alice
+    synchronize_similar_repos "$repo"
+    if [ "_$RET" = "_SYNC" ]; then
+      if [ "_$QUIET" = "_YES" ]; then echo $PREVLINE ; fi
+      rm -rf "${TEMPLINE}"/* "${TEMPLINEDATA}"/*
+      summarize_similar_repos "$repo" "SYNC"
+      echo "$RET"
+    fi
 
-      NUMLOG=`echo $RET|cut -d: -f2`
-      NUMSTAT=`echo $RET|cut -d: -f3`
-      HASH=`echo $RET|cut -d: -f4`
-      RANK="${TEMPLINE}/rank${NUMLOG}_${HASH}_${NUMSTAT}"
-      if [ -r "$RANK" ]; then
-        echo `head -1 "$RANK"`,$ABBREV > "$RANK"
-      else
-        NUMLOG=`echo $NUMLOG|sed "s:^0*::"`
-        if [ "_$NUMLOG" = "_" ]; then NUMLOG=0; fi
-        NUMSTAT=`echo $NUMSTAT|sed "s:^0*::"`
-        if [ "_$NUMSTAT" = "_" ]; then NUMSTAT=0; fi
-        echo "${NUMLOG}:${NUMSTAT}:${ABBREV}" > "$RANK"
-      fi
-
-    done < "${TEMPDIR}/labels"
-
-    FIRST=YES
-    LINE="${ABBREV_LINE}"
-    for file in `ls "${TEMPLINE}"/rank*|sort -r`; do
-      FILE=`cat "$file"`
-      if [ "$FIRST" = "YES" ]; then
-        LINE="${LINE} ${repo} ${FILE}"
-        FIRST=NO
-      else
-        LINE="${LINE} > ${FILE}"
-      fi
+    #
+    # save tempdata to global data
+    #
+    for label in `ls "${TEMPLINEDATA}"`; do
+      cat "${TEMPLINEDATA}/${label}" >> "${TEMPDATA}/${label}"
     done
-    echo "$LINE"
 
-     #
-     # Summary
-     #########
-     # alex/cool:0000013:0000007:a1bc13d:alice
-     # alex/cool:0000013:0000003:a1bc13d:frank
-     # alex/cool:0000012:0000000:dfac12f:bob
-     # alex/cool:0000012:0000000:dfac12d:eve
-     # alex/cool:0000011:0000004:ce2c11a:dave
-     # alex/cool:0000011:0000000:ce2c11a:dave
+  done < "${TEMPDIR}/abstractrepos"
+}
 
+update_list() {
+  mv "${TEMPDATA}"/* "${DATADIR}"
+}
 
-     #
-     # Output
-     #########
-     # a b c d e f alex/cool 13:7:a > 13:3:f > 12:0:b,e > 11:4:d > 11:0:c
-     # Synchronize alex/cool 13:7:a > 13:3:f > 13:0:b,c,e > 11:4:d
+list_global() {
+  TEMPLINE=${TEMPDIR}/line
+  #
+  # cleanup the comparisons
+  #
+  rm -rf "${TEMPDIR}"/*
 
-   
+  cut -d: -f1 "${DATADIR}"/* | sort | uniq > \
+      "${TEMPDIR}/abstractrepos"
+
+  cut -d: -f5 "${DATADIR}"/* | sort | uniq > \
+      "${TEMPDIR}/labels"
+
+  while read repo; do
+    if [ -d "${TEMPLINE}" ]; then
+         rm -rf "${TEMPLINE}"/*
+    else mkdir -p "${TEMPLINE}"
+    fi
+
+    summarize_precomputed_repos "$repo"
+    echo "$RET"
+
   done < "${TEMPDIR}/abstractrepos"
 }
 
 cleanup() {
-  echo rm -rf "${TEMPDIR}"
+  rm -rf "${TEMPDIR}"
 }
 
 main() {
   initialize
-  search_repos
-  abstract_data
-  label_devices
-  compare_repos
-return
+  if [ "_$LIST" = "_YES" ]; then
+    list_global
+  else
+    search_repos
+    abstract_data
+    label_devices
+    compare_repos
+    update_list
+  fi
   cleanup
 }
 
 main
-exit
-
-get_device_and_user() {
-  RET_TYPE=NO
-  RET_DEVICE=NO
-  RET_LABEL=NO
-  RET_USER=NO
-  RET_BASE=NO
-  if [ $# -ne 1 ]; then runtime_error "get_device_and_user wrong arg num"; fi
-
-  if   [ `echo "_$1"|sed "s:^_/\(home\)/..*:\1:"\
-       |grep ^home$    |wc -l` = "1" ]; then
-    ROOT=/home
-  elif [ `echo "_$1"|sed "s:^_/\(cygdrive\)/..*:\1:"\
-       |grep ^cygdrive$|wc -l` = "1" ]; then
-    ROOT=/cygdrive
-  elif [ `echo "_$1"|sed "s:^_/\(mnt\)/..*:\1:"\
-       |grep ^mnt$     |wc -l` = "1" ]; then
-    ROOT=/mnt
-  elif [ `echo "_$1"|sed "s:^_/\(media\)/..*:\1:"\
-       |grep ^media$   |wc -l` = "1" ]; then
-    ROOT=/media
-  else
-    return
-  fi
-  POSTROOT=`echo "$1"|sed "s:^/\(home\|cygdrive\|mnt\|media\)/\(.*\)$:\2:"`
-
-  RET_TYPE=EXTERNAL
-  if [ "$ROOT" = "/home" ]; then
-    RET_DEVICE=$ROOT
-    RET_TYPE=INTERNAL
-    if [ `echo _$HOSTNAME|wc -c` -ge 3 ]; then
-      RET_LABEL=$HOSTNAME
-    fi
-    if [ `echo "$POSTROOT"|sed "s:^\([^/]*\).*:\1:"|wc -c` -gt 2 ]; then
-      RET_USER=`echo "$POSTROOT"|sed "s:^\([^/]*\).*:\1:"`
-    fi
-  elif [ "$ROOT" = "/cygdrive" ]; then
-    if [ `echo "$POSTROOT"|sed "s:^\([^/]*\).*:\1:"|wc -c` -gt 1 ]; then
-      RET_DEVICE=${ROOT}/`echo "$POSTROOT"|sed "s:^\([^/]*\).*:\1:"`
-      if [ -r "${RET_DEVICE}/.label" ]; then
-        TST=`head -1 "${RET_DEVICE}/.label"|sed "s:^\([a-zA-Z][a-zA-Z0-9]*\).*$:\1:"`
-        if [ `echo "_$TST"|wc -c` -gt 1 ]; then
-          RET_LABEL=$TST
-        fi
-      fi
-      if [ `echo "$POSTROOT"|sed "s:^[^/]*/\([^/]*\).*:\1:"|wc -c` -ge 2 ]; then
-        RET_USER=`echo "$POSTROOT"|sed "s:^[^/]*/\([^/]*\).*:\1:"`
-      fi
-    fi 
-  elif [ "$ROOT" = "/mnt" -o "$ROOT" = "/media" ]; then
-    if [ `echo "$POSTROOT"|sed "s:^\([^/]*\).*:\1:"|wc -c` -gt 1 ]; then
-      RET_LABEL=`echo "$POSTROOT"|sed "s:^\([^/]*\).*:\1:"`
-      RET_DEVICE=${ROOT}/${RET_LABEL}
-      if [ -r "${RET_DEVICE}/.label" ]; then
-        TST=`head -1 "${RET_DEVICE}/.label"|sed "s:^\([a-zA-Z][a-zA-Z0-9]*\).*$:\1:"`
-        if [ `echo "_$TST"|wc -c` -gt 1 ]; then
-          RET_LABEL=$TST
-        fi
-      fi
-      if [ `echo "$POSTROOT"|sed "s:^[^/]*/\([^/]*\).*:\1:"|wc -c` -ge 2 ]; then
-        RET_USER=`echo "$POSTROOT"|sed "s:^[^/]*/\([^/]*\).*:\1:"`
-      fi
-    fi
-  fi
-  if [ "$RET_DEVICE" != "NO" -a "$RET_USER" != "NO" ]; then
-    RET_BASE="${RET_DEVICE}/${RET_USER}"
-  fi
-}
-
-
-
-BASEDIR="${PWD}"
-if [ "$COMPARE" = "NO" ]; then
-  get_device_and_user "$BASEDIR"
-  
-  #
-  # check if we can meaningfully record this tree,
-  # does it have a device and name, such as /media/device/name/...
-  # or /home/name/...
-  #
-  if [ "$RET_DEVICE" = "NO" -o "$RET_USER"  = "NO" \
-    -o "$RET_LABEL"  = "NO" -o "$RET_BASE"  = "NO" ]; then
-    SAVE=NO
-  else
-    SAVE=YES
-    mkdir -p "${HOME}/.rg/data"
-    TEMPDIR="${HOME}/.rg/tmp$$"
-    mkdir -p "${TEMPDIR}"
-    SAVEOUT="${TEMPDIR}/${RET_LABEL}"
-  fi
-
-  for GITDIR in `find * .[a-zA-Z0-9]* -name "*.git"|sed "s:/.git$::"|sort|uniq`;do
-    record_and_print_repo "${BASEDIR}/${GITDIR}" $SAVE $VERBOSE "$RET_DEVICE" "$SAVEOUT" "$TEMPDIR" 
-  done
-fi
-exit
-#
-# rg : recursive git synchronization
-#
-# calls 'rgc' comparing /home/user
-#        to any /media/device/user
-#
-rg() {
- if [ "${USERNAME}" = "" ]; then USERNAME=$USER
- fi
- if [ "${USERNAME}" = "" ]; then return; fi
- for m in `find /media/*/${USERNAME} /cygdrive/*/${USERNAME} \
-     -maxdepth 0 -mindepth 0 -type d`; do
-  rgc "${HOME}" "${m}"
- done 2> /dev/null
-}
-
