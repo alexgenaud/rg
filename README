@@ -1,0 +1,157 @@
+===========================
+rgs - recursive git summary
+    -v verbose (includes also clean repos)
+
+prints the .git path, last log summary and status. Example:
+
+   /home/alex/.environment/data/rglist
+   * a360c63 Summer 2011
+    M G300
+    D enkidu
+   ?? ananda
+===========================
+rgc - recursive git compare
+usage: rgc [-vd] dir1 [dir2]
+# rgc recursive git compare
+#
+#     compares and synchronized git repos in
+#              similar relative paths.
+#     -v verbose reports unique and
+#              synchronized repos, that
+#              would normally be skipped
+#     -vv extra verbose includes
+#              unique clean repos
+#     -d dry run, does not pull from latest
+===========================
+
+
+=====
+rg
+=====
+collect all git repositories from cwd downtree
+for all unclean, print summary + number of unclean, ex:
+   f data/list 4:a360c63 Summer 2011 :5
+
+=====
+rg -v
+=====
+collect all git repositories from cwd downtree
+for all repos, print summary + number of unclean, ex:
+   f data/list 4:a360c63 Summer 2011 :5
+   f foo/bar   6:e4b2f7a Check in    :0
+
+=====
+rg -c
+=====
+collect all git repositories from cwd downtree
+find other connected media with similar relative structure
+compare. Sync all clean ffwd.
+If all have same linear history, sync all clean to the latest
+if any unclean or behind, print combined ordered summary,
+synch, print again, ex:
+  w  z data/list 1:97e57c8:0 Spring 2009
+   x   data/list 2:7ec2f74:0 Winter 2010
+ f     data/list 4:a360c63:5 Summer 2011
+    Y  data/list 5:9e2d557:7 Fall 2013
+Synchronizing z,x < y. h is unclean, unchanged
+ f     data/list 4:a360c63:5 Summer 2011
+  wx z data/list 5:9e2d557:0 Fall 2013
+    Y  data/list 5:9e2d557:7 Fall 2013
+
+=====
+rg -l
+=====
+list all known git repo status, for example:
+ B      alex/data/list   4:a360c63: 0 Summer 2011
+  f     alex/data/list   4:a360c63: 5 Summer 2011
+   wx z alex/data/list   5:9e2d557: 0 Fall 2013
+     Y  alex/data/list   5:9e2d557: 7 Fall 2013
+ Bf x z alex/.rg/bin    27:4ef5cd5: 0 Super bug fix
+ B  xY  alex/.rg/data  123:ef5cd52: 0 Blah blah
+  f     alex/.rg/data  123:ef5cd52:10 Blah blah
+
+
+
+
+=====
+device is either a computer internal disk or external disk.
+
+=====
+label is either
+   /.label (or if not available)
+   machine domain name (or if external)
+   the disk label
+
+=====
+abbrev is the first letter of label, case sensitive
+
+=====
+type repositories can be bare, working, or export
+  bare has no working files and is always clean
+  working has working files and might be unclean
+  export contains files and a .git file but no repository,
+    its .git file must contain the log summary
+    when it was created (git log --oneline --graph)
+
+=====
+relative path - rg looks for directories under USERNAME, ex:
+    /home/USERNAME
+    /cygdrive/LABEL/Users/USERNAME
+    /media/LABEL/USERNAME
+  So, for example, the following are considered relative paths:
+    /home/alex/bin/foo/bar
+    /media/Baz/alex/bin/foo/bar
+
+=====
+.rg/data
+  Store status of all repos in .rg/data by device name.
+    $ head ${HOME}/.rg/data/*
+    ==> .rg/data/fish <==
+    alex/.rg/bin 27:4ef5cd5:0 Super bug fix
+    alex/.rg/data 123:ef5cd52:10 Blah blah
+    alex/bin/foo/bar 8:d5ec2f5:0 Blah blah
+    alex/data/list 4:a360c63:5 Summer 2011
+    ==> .rg/data/Baz <==
+    alex/bin/foo/bar 8:d5ec2f5:0 Blah blah
+    alex/data/list 4:a360c63:0 Summer 2011
+  Even if Baz contains only bare repositories such as
+  bar.git, it will be listed as just 'bar' without the
+  '.git' suffix
+
+
+
+=============
+
+rg
+
+10. run global: find / -name "*.git" 1> tmp 2> /dev/null
+
+20. discover the labels and names of each
+/cygdrive/x/name, /home/name, /media/device/name, /mnt/device/name
+
+30. order relative groups: for example
+alex/foo/bar /home       ananda
+alex/foo/bar /media/Baz  Baz
+alex/foo/bar /cygdrive/c charlie
+alex/foo/bar /mnt/Dave   Dave
+
+40. investigate status of each relative group
+  c  alex/foo/bar 13:8a22d3d:7
+a    alex/foo/bar 12:d8ad232:2
+ B D alex/foo/bar 11:a3cda22:0
+
+50. print all in group if verbose or if any are different or unclean
+
+60. synchronize all cleans to latest
+  c  alex/foo/bar 13:8a22d3d:7
+ B D alex/foo/bar 13:8a22d3d:0
+a    alex/foo/bar 12:d8ad232:2
+
+70. update global data
+  c     alex/foo/bar 13:8a22d3d:7
+ B De G alex/foo/bar 13:8a22d3d:0
+a       alex/foo/bar 12:d8ad232:2
+     f  alex/foo/bar 12:d8ad232:0
+
+
+.rg/tmp132/
