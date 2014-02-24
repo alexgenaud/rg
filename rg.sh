@@ -51,7 +51,8 @@ initialize() {
 }
 
 search_repos() {
-  find / -type d -name "*.git" \
+  find /home /cygdrive /media /mnt \
+       -type d -name "*.git" \
        2> /dev/null \
        | sed "s:/*.git$::" | sort \
        1> "${TEMPDIR}/allrepos" \
@@ -163,13 +164,13 @@ summarize_similar_repos() {
     ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
     FULLPATH=
     TYPE=
-    if [ -d "${DEVICE}/${repo}" ]; then
-      FULLPATH="${DEVICE}/${repo}"
-      TYPE=WORK
-      ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
-    elif [ -d "${DEVICE}/${repo}.git" ]; then
+    if [ -d "${DEVICE}/${repo}.git" ]; then
       FULLPATH="${DEVICE}/${repo}.git"
       TYPE=BARE
+      ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
+    elif [ -d "${DEVICE}/${repo}/.git" ]; then
+      FULLPATH="${DEVICE}/${repo}"
+      TYPE=WORK
       ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
     else
       # this device does not have this repository
@@ -203,7 +204,7 @@ summarize_similar_repos() {
   FIRST=YES
   RET="${ABBREV_LINE}"
   if [ "_$SHOWSYNC" = "_SYNC" ]; then
-    RET=`echo $RET|sed "s:.:=:g"`
+    RET=`echo "$RET"|sed "s:.:=:g"`
   fi
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`

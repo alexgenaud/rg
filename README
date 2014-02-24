@@ -1,29 +1,9 @@
-===========================
-rgs - recursive git summary
-    -v verbose (includes also clean repos)
+todo:
+export synch
+test spaces in path, device, label, etc
 
-prints the .git path, last log summary and status. Example:
-
-   /home/alex/.environment/data/rglist
-   * a360c63 Summer 2011
-    M G300
-    D enkidu
-   ?? ananda
-===========================
-rgc - recursive git compare
-usage: rgc [-vd] dir1 [dir2]
-# rgc recursive git compare
-#
-#     compares and synchronized git repos in
-#              similar relative paths.
-#     -v verbose reports unique and
-#              synchronized repos, that
-#              would normally be skipped
-#     -vv extra verbose includes
-#              unique clean repos
-#     -d dry run, does not pull from latest
-===========================
-
+aAfGny alex/.rg/bin 5:0:a > 4:0:A,G,y > 3:0:n > 2:0:f
+====== alex/.rg/bin 5:0:a,A,f,G,n,y
 
 =====
 rg
