@@ -51,24 +51,31 @@ initialize() {
 }
 
 search_repos() {
-  find /home /cygdrive /media /mnt \
-       -type d -name "*.git" \
+  ROOT=`echo "${SYSTEMROOT}"|grep -i Windows|\
+             cut -c 1|tr '[:upper:]' '[:lower:]'`
+  if [ "_$ROOT" != "_" -a -d "/cygdrive/${ROOT}/Users" ]; then
+    DRIVES="/cygdrive/${ROOT}/Users "`ls -d /cygdrive/*|grep -v /cygdrive/$ROOT`
+  else
+    DRIVES="/home /media /mnt"
+  fi
+
+  find $DRIVES -type d -name "*.git" \
        2> /dev/null \
+       | grep -v "^/cygdrive/./cyg[^/]*/home" \
        | sed "s:/*.git$::" | sort \
        1> "${TEMPDIR}/allrepos" \
        2> /dev/null
 }
 
 abstract_data() {
-  # get devices
   grep "^/\(home\|cygdrive/[a-z]\|media/[^/]*\|mnt/[^/]*\)/.*"\
        "${TEMPDIR}/allrepos" |\
-       sed "s:^/\(home\|[cm][a-z]*/[^/]*\)/\(.*\)$:/\1:" |\
+       sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:/\1:" |\
        sort | uniq 1> "${TEMPDIR}/devices"
 
   grep "^/\(home\|cygdrive/[a-z]\|media/[^/]*\|mnt/[^/]*\)/.*"\
        "${TEMPDIR}/allrepos" |\
-       sed "s:^/\(home\|[cm][a-z]*/[^/]*\)/\(.*\)$:\2:" |\
+       sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:\2:" |\
        sort | uniq 1> "${TEMPDIR}/abstractrepos"
 }
 
@@ -77,8 +84,12 @@ label_devices() {
     LABEL=
     if [ "_$device" = "_/home" -a `echo _$HOSTNAME|wc -c` -ge 3 ]; then
       echo "${HOSTNAME}:${device}" >> "${TEMPDIR}/labels"
-    elif [ "_`echo $device|grep ^/cygdrive/[a-z]$|wc -l`" = "_1" ]; then
-      if [ -r ${device}/.label ]; then
+    #elif [ "_`echo $device|grep ^/cygdrive/[a-z]|wc -l`" = "_1" ]; then
+    elif [ _`echo $device|grep "^/cygdrive/\([a-z]\|[a-z]/Users\)$"|wc -l` = "_1" ]; then
+      ROOTDIR=`echo "${SYSTEMROOT}_"|cut -c 1|tr '[:upper:]' '[:lower:]'`
+      if [ `echo $device|grep "^/cygdrive/$ROOTDIR"|wc -l` != "0" ]; then
+        LABEL="${HOSTNAME}"
+      elif [ -r ${device}/.label ]; then
         LABEL=`head -1 ${device}/.label|\
              sed "s:^\([a-zA-Z0-9][a-zA-Z0-9]*\).*$:\1:"|\
              grep "^[a-zA-Z0-9][a-zA-Z0-9]*$"`
@@ -110,7 +121,6 @@ label_devices() {
 _digits7() {
   RET=`echo 0000000$1|sed "s:^.*\(.......\)$:\1:"`
 }
-
 
 summarize_one_repo() {
   FULLPATH=$1
@@ -209,7 +219,9 @@ summarize_similar_repos() {
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      RET="${RET} ${repo} ${FILE}"
+      REPO=`echo ${repo}|awk '{ printf "%-50s", $1 }'`
+      RET="${RET} $REPO ${FILE}"
+      #RET="${RET} ${repo} ${FILE}"
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
@@ -264,7 +276,9 @@ summarize_precomputed_repos() {
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      RET="${RET} ${repo} ${FILE}"
+      REPO=`echo ${repo}|awk '{ printf "%-50s", $1 }'`
+      RET="${RET} $REPO ${FILE}"
+      #RET="${RET} ${repo} ${FILE}"
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
