@@ -122,11 +122,18 @@ _digits7() {
   RET=`echo 0000000$1|sed "s:^.*\(.......\)$:\1:"`
 }
 
+############################################################
+#
+# summarize_one_repo
+#
+# RET example:
+#
+#     0000013:0000007:a1bc13d
+#
+############################################################
 summarize_one_repo() {
   FULLPATH=$1
   TYPE=$2
-  ABSTRACT=$3
-  LABEL=$4
   ORIGDIR="$PWD"
   cd "${FULLPATH}"
   
@@ -135,12 +142,6 @@ summarize_one_repo() {
   NUMLOG=`wc -l "${TEMPDIR}/log" | sed "s:^[^0-9]*\([0-9]*\).*$:\1:"`
   _digits7 $NUMLOG
   NUMLOG=$RET
-
-  # latest hash code
-  LOGHASH=`head -1 "${TEMPDIR}/log"|sed "s:^[^a-f0-9]*\([a-f0-9]*\) \(.*\)$:\1:"`
-
-  # latest log message
-  LOGTEXT=`head -1 "${TEMPDIR}/log"|sed "s:^[^a-f0-9]*\([a-f0-9]*\) \(.*\)$:\2:"`
 
   # number of unclean changes (modified, delete, untracked)
   NUMSTAT=0000000
@@ -154,9 +155,7 @@ summarize_one_repo() {
   # return to original directory
   cd "${ORIGDIR}"
 
-  # return array
-  # example alex/cool:0000013:0000007:a1bc13d:alice:Bug fixes
-  RET="${ABSTRACT}:${NUMLOG}:${NUMSTAT}:${LOGHASH}:${LABEL}:${TYPE}:${LOGTEXT}"
+  RET="${NUMLOG}:${NUMSTAT}"
 }
 
 summarize_similar_repos() {
@@ -189,16 +188,16 @@ summarize_similar_repos() {
       continue
     fi
 
-    summarize_one_repo "$FULLPATH" "$TYPE" "$repo" "$LABEL"
-    echo "$RET" > "${TEMPLINEDATA}/${LABEL}"
-    # alex/cool:0000013:0000007:a1bc13d:alice
+    summarize_one_repo "$FULLPATH" "$TYPE"
+    # 0000013:0000007
+    echo "${RET}:${LABEL}:${repo}" > "${TEMPLINEDATA}/${LABEL}"
+    # 0000013:0000007:alice:foo/bar
 
-    NUMLOG=`echo $RET|cut -d: -f2`
-    NUMSTAT=`echo $RET|cut -d: -f3`
-    HASH=`echo $RET|cut -d: -f4`
-    echo "${NUMLOG}:${NUMSTAT}:${TYPE}:${FULLPATH}" >> "${TEMPLINE}/rankindiv"
+    NUMLOG=`echo $RET|cut -d: -f1`
+    NUMSTAT=`echo $RET|cut -d: -f2`
+    echo "${NUMLOG}:${NUMSTAT}:${TYPE}:${FULLPATH}" >> "${TEMPLINE}/ranksync"
 
-    RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${HASH}_${NUMSTAT}"
+    RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${NUMSTAT}"
     if [ -r "$RANKFILE" ]; then
       echo `head -1 "$RANKFILE"`,$ABBREV > "$RANKFILE"
     else
@@ -243,8 +242,8 @@ summarize_precomputed_repos() {
     LABEL=`echo $dev|cut -d: -f1`
     ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
     
-    #bin.bak.work:0000004:0000000:21dc865:ARCH_201311:WORK:search, index, label, not yet compare
-    LINE=`grep "^${repo}:" "${DATADIR}/$LABEL"`
+    #0000004:0000000:ARCH_201311:foobar
+    LINE=`grep ":${repo}$" "${DATADIR}/$LABEL"`
 
     if [ "_`echo $LINE|wc -c`" != "_1" ]; then
       ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
@@ -254,11 +253,10 @@ summarize_precomputed_repos() {
       continue
     fi
 
-    NUMLOG=`echo $LINE|cut -d: -f2`
-    NUMSTAT=`echo $LINE|cut -d: -f3`
-    HASH=`echo $LINE|cut -d: -f4`
+    NUMLOG=`echo $LINE|cut -d: -f1`
+    NUMSTAT=`echo $LINE|cut -d: -f2`
 
-    RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${HASH}_${NUMSTAT}"
+    RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${NUMSTAT}"
     if [ -r "$RANKFILE" ]; then
       echo `head -1 "$RANKFILE"`,$ABBREV > "$RANKFILE"
     else
@@ -302,7 +300,7 @@ synchronize_similar_repos() {
   LATEST=YES
 
   # 0000004:0000001:WORK:/home/alex/.rg/bin
-  sort -r "${TEMPLINE}/rankindiv" > "${TEMPLINE}/sort"
+  sort -r "${TEMPLINE}/ranksync" > "${TEMPLINE}/sort"
   while read RANK; do
     LOGNUM=`echo $RANK|cut -d: -f1|sed "s:^0*::"`
     if [ "_$LOGNUM" = "_" ]; then LOGNUM=0; fi
@@ -408,11 +406,12 @@ list_global() {
   #
   rm -rf "${TEMPDIR}"/*
 
-  cut -d: -f1 "${DATADIR}"/* | sort | uniq > \
-      "${TEMPDIR}/abstractrepos"
-
-  cut -d: -f5 "${DATADIR}"/* | sort | uniq > \
+  # 0000013:0000007:alice:foo/bar
+  cut -d: -f3 "${DATADIR}"/* | sort | uniq > \
       "${TEMPDIR}/labels"
+
+  cut -d: -f4 "${DATADIR}"/* | sort | uniq > \
+      "${TEMPDIR}/abstractrepos"
 
   while read repo; do
     if [ -d "${TEMPLINE}" ]; then
