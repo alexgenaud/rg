@@ -17,49 +17,388 @@
 # These rights, on this notice, rely.
 #
 ###################################################
-get_arg() {
-  if [ `echo "${1}_"|sed "s:^\(.\).*:\1:g"` = "-" ]; then
-    if [ `echo "$1"|grep d|wc -l` = "1" ]; then DRYRUN=YES  ; fi
-    if [ `echo "$1"|grep v|wc -l` = "1" ]; then VERBOSE=YES ; fi
-    if [ `echo "$1"|grep l|wc -l` = "1" ]; then LIST=YES    ; fi
-    if [ `echo "$1"|grep q|wc -l` = "1" ]; then QUIET=YES   ; fi
-  elif [ "$ARG1" = "NO" ]; then ARG1="$1"
-  elif [ "$ARG2" = "NO" ]; then ARG2="$1"
-  elif [ "$ARG3" = "NO" ]; then ARG3="$1"
-  fi
-}
+#
+# rg - recursive git
+#
+# A backup, integrity, and overview tool based on
+# git and a shell script.
+#
+#
+# ======================
+# Report and Synchronize
+# ======================
+#
+# rg         = check all drives and /home,
+#              synchronize and report comparison
+#
+# rg -d      = dry run. Report but do not
+#              synchronize
+#
+# rg -l      = list. Report only
+#
+# rg -q      = quiet. Show only synchronizations
+#
+#
+# ================
+# Backup and clone
+# ================
+#
+# rg -b TARGET  = bare, backup. Synchronize or
+#              clone all to TARGET as bare repos
+#
+# rg -w TARGET  = work. Synchronize or clone all
+#              to TARGET as working repos
+#
+###################################################
 
 DRYRUN=NO
-VERBOSE=NO
 QUIET=NO
 LIST=NO
-ARG1=NO
-ARG2=NO
-ARG3=NO
+TARGET=NO
+BACKUP=NO
 
-if [ $# -ge 1 ]; then get_arg "$1" ; fi
-if [ $# -ge 2 ]; then get_arg "$2" ; fi
-if [ $# -ge 3 ]; then get_arg "$3" ; fi
-if [ $# -ge 4 ]; then get_arg "$4" ; fi
+############################################################
+# get_arg
+############################################################
+get_arg() {
+  if [ `echo "${1}_"|sed "s:^\(.\).*:\1:g"` = "-" ]; then
+    if [ `echo "$1"|grep d|wc -l` = "1" ]; then DRYRUN=YES   ; fi
+    if [ `echo "$1"|grep l|wc -l` = "1" ]; then LIST=YES     ; fi
+    if [ `echo "$1"|grep q|wc -l` = "1" ]; then QUIET=YES    ; fi
+    if [ `echo "$1"|grep b|wc -l` = "1" ]; then _BACKBARE=YES ; fi
+    if [ `echo "$1"|grep w|wc -l` = "1" ]; then _BACKWORK=YES ; fi
+  elif [ "$TARGET" = "NO" ]; then
+    TARGET="$1"
+    return
+  fi
+  if   [ "_$_BACKBARE" = "_YES" ]; then BACKUP=BARE
+  elif [ "_$_BACKWORK" = "_YES" ]; then BACKUP=WORK ; fi
+}
+if   [ $# -ge 1 ]; then get_arg "$1" ; fi
+if [ $# -ge 2 -a "_$TARGET" = "_NO" ]; then TARGET="$2" ; fi
 
+
+############################################################
+# initialize
+############################################################
 initialize() {
+  #
+  # create some persistent and temp directories
+  #
+  # NB: HOME is the Linux/Cygwin HOME
+  # further below we will normalize, for example
+  # HOME=/home/u = /cygdrive/c/Users/u
+  #
   DATADIR="${HOME}/.rg/data"
   TEMPDIR="${HOME}/.rg/tmp/$$"
   TEMPDATA="${TEMPDIR}/data"
   mkdir -p "${DATADIR}"
   mkdir -p "${TEMPDATA}"
+
+  #
+  # on a windows machine, typically, WINROOT=c
+  # on a Linux machine, we expect WINROOT=_
+  #
+  WINROOT=`echo "${HOMEDRIVE}_"|cut -c 1|\
+    tr '[:upper:]' '[:lower:]'`
+
+  if [ "_$WINROOT" != "__" ]; then
+    # Windows
+    HOME=/cygdrive/${WINROOT}$(echo "$HOMEPATH"|sed "s:\\\\:/:g")
+  fi
 }
 
-search_repos() {
-  ROOT=`echo "${SYSTEMROOT}"|grep -i Windows|\
-             cut -c 1|tr '[:upper:]' '[:lower:]'`
-  if [ "_$ROOT" != "_" -a -d "/cygdrive/${ROOT}/Users" ]; then
-    DRIVES="/cygdrive/${ROOT}/Users "`ls -d /cygdrive/*|grep -v /cygdrive/$ROOT`
+############################################################
+#
+# parse_target
+#
+# ARGS
+#     1. TARGET_ABSOLUTE          /some/path
+#     2. WINROOT                  c|[a-z]|_
+#
+#     * on Windows WINROOT is typically 'c'
+#       on Linux WINROOT='_'
+#
+# RETURN
+#     TARGET_DEVICE
+#     TARGET_REPO
+#     RET=ERROR|OK
+#
+############################################################
+parse_target() {
+  if [ $# -ne 2 ]; then
+    echo rg: Error in parse_target expects two arguments TARGET, OS
+    exit 1
+  fi
+  TARGET_ABSOLUTE=$1
+  WINROOT=$2
+
+  if [ "_$WINROOT" == "__" ]; then
+    #
+    # assume Linux macine
+    #
+    TARGET_DEVICE=`echo $TARGET_ABSOLUTE |\
+       grep    "^/\(home\|media/[^/]*\|mnt/[^/]*\)" |\
+       grep -v "^/\(home\|m[a-t]*/[^/]*\)/\(Users\|home\)" |\
+       sed   "s:^/\(home\|m[a-t]*/[^/]*\).*$:/\1:"`
+    TARGET_REPO=`echo $TARGET_ABSOLUTE |\
+       grep    "^/\(home\|media/[^/]*\|mnt/[^/]*\)" |\
+       grep -v "^/\(home\|m[a-t]*/[^/]*\)/\(Users\|home\)" |\
+       sed -e "s:^/\(home\|m[a-t]*/[^/]*\)/*\(.*\)$:\2:"\
+           -e "s:/*$::"`
   else
-    DRIVES="/home /media /mnt"
+    #
+    # assume Windows machine running cygwin
+    #
+    TARGET_DEVICE=`echo $TARGET_ABSOLUTE |\
+       grep    "^/cygdrive/[a-z]" |\
+       grep    "^/cygdrive/\(${WINROOT}/Users\|[^${WINROOT}]\)" |\
+       grep -v "^/cygdrive/[^${WINROOT}]/\(Users\|home\)" |\
+       sed "s:^\(/cygdrive/\)\(${WINROOT}/Users\|[^${WINROOT}]\).*$:\1\2:"`
+    TARGET_REPO=`echo $TARGET_ABSOLUTE |\
+       grep    "^/cygdrive/[a-z]" |\
+       grep    "^/cygdrive/\(${WINROOT}/Users\|[^${WINROOT}]\)" |\
+       grep -v "^/cygdrive/[^${WINROOT}]/\(Users\|home\)" |\
+       sed -e "s:^\(/cygdrive/\)\(${WINROOT}/Users\|[^${WINROOT}]\)/*\(.*\)$:\3:"\
+           -e "s:/*$::"`
   fi
 
-  find $DRIVES -type d -name "*.git" \
+  RET=ERROR
+  if [ "_$TARGET_ABSOLUTE" = "_/" -o "_$TARGET_ABSOLUTE" = "_" ]; then
+    RET=ERROR
+  elif [ "_$TARGET_REPO" = "_" -a "_$TARGET_ABSOLUTE" = "_$TARGET_DEVICE" ]; then
+    RET=OK
+  elif [ "_$TARGET_ABSOLUTE" = "_${TARGET_DEVICE}/$TARGET_REPO" ]; then
+    RET=OK
+  else
+    RET=ERROR
+  fi
+}
+
+############################################################
+# parse_target_assert
+############################################################
+parse_target_assert() {
+  if [ $# -ne 5 ]; then
+    echo rg: Error in parse_target_assert expects 5 arguments
+    exit 1
+  fi
+  TARGET_ABSOLUTE=$1
+  WINROOT=$2
+  EXPECT_DEVICE=$3
+  EXPECT_REPO=$4
+  EXPECT_RET=$5
+  parse_target "$TARGET_ABSOLUTE" "$WINROOT"
+      A=$(_left20 "\"${TARGET_ABSOLUTE}\"")
+      B=$(_left5    "${WINROOT}")
+  if [ "_$EXPECT_DEVICE" = "_$TARGET_DEVICE" -a \
+       "_$EXPECT_REPO"   = "_$TARGET_REPO" -a \
+       "_$EXPECT_RET"    = "_$RET" ]; then
+      C=$(_left20 "\"${TARGET_DEVICE}\"")
+      D=$(_left10 "\"${TARGET_REPO}\"")
+      E=$(_left10   "${RET}")
+      #echo "OK   ${A} ${B} ${C} ${D} ${E}"
+  else
+      C=$(_left20 "\"${TARGET_DEVICE}\"")
+      D=$(_left10 "\"${TARGET_REPO}\"")
+      E=$(_left10   "${RET}")
+      echo "FAIL ${A} ${B} ${C} ${D} ${E}"
+      A=$(_left20 "Expected:")
+      C=$(_left20 "\"${EXPECT_DEVICE}\"")
+      D=$(_left10 "\"${EXPECT_REPO}\"")
+      E=$(_left10   "${EXPECT_RET}")
+      echo "   ${A}         ${C} ${D} ${E}"
+  fi
+}
+
+
+############################################################
+# parse_target_test
+############################################################
+parse_target_test() {
+  parse_target_assert \
+    "/home"             "_" "/home"             ""      "OK"
+  parse_target_assert \
+    "/home/a"           "_" "/home"             "a"     "OK"
+  parse_target_assert \
+    "/media/a"          "_" "/media/a"          ""      "OK"
+  parse_target_assert \
+    "/media/a/b"        "_" "/media/a"          "b"     "OK"
+  parse_target_assert \
+    "/mnt/a"            "_" "/mnt/a"            ""      "OK"
+  parse_target_assert \
+    "/mnt/a/b"          "_" "/mnt/a"            "b"     "OK"
+  parse_target_assert \
+    "/media/home"       "_" "/media/home"       ""      "OK"
+  parse_target_assert \
+    "/media/Users"      "_" "/media/Users"      ""      "OK"
+  parse_target_assert \
+    "/mnt/home"         "_" "/mnt/home"         ""      "OK"
+  parse_target_assert \
+    "/mnt/Users"        "_" "/mnt/Users"        ""      "OK"
+  parse_target_assert \
+    "/mnt/hello world"  "_" "/mnt/hello world"  ""      "OK"
+
+  parse_target_assert \
+    ""                  "_" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/"                 "_" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/a"                "_" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/home/home"        "_" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/home/Users"       "_" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/media/a/home"    "_" ""                   ""      "ERROR"
+  parse_target_assert \
+    "/media/a/Users"   "_" ""                   ""      "ERROR"
+  parse_target_assert \
+    "/mnt/a/home"      "_" ""                   ""      "ERROR"
+  parse_target_assert \
+    "/mnt/a/Users"     "_" ""                   ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive/c/Users" "_" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive/x"       "_" ""                  ""      "ERROR"
+
+  parse_target_assert \
+    "/cygdrive/c/Users" "c" "/cygdrive/c/Users" ""      "OK"
+  parse_target_assert \
+    "/cygdrive/x"       "c" "/cygdrive/x"       ""      "OK"
+
+  parse_target_assert \
+    ""                  "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/"                 "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/x"                "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/home"             "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive"         "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive/c"       "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive/c/x"     "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive/x/Users" "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive/x/home"  "c" ""                  ""      "ERROR"
+  parse_target_assert \
+    "/cygdrive/c/home"  "c" ""                  ""      "ERROR"
+}
+
+############################################################
+# normalize_target
+############################################################
+normalize_target() {
+  #
+  # if TARGET is not set, the assume the home directory
+  #
+  if [ "_$TARGET" = "_" -o "_$TARGET" = "_NO" ]; then
+    TARGET=$HOME
+  elif [ "_$TARGET" = "_/" ]; then
+    TARGET=$( echo $HOME|sed "s:/[^/]*$::" )
+  fi
+
+  #
+  # clean up trailing /
+  #
+  TARGET=`echo $TARGET|sed "s:/*$::"`
+
+  #
+  # find absolute path from relative path, for example
+  # relative path foo/bar might be absolute /home/foo/bar
+  #
+  TARGET_ABSOLUTE="$TARGET"
+  if [ "0" = `echo $TARGET|grep "^/"|wc -l` ]; then
+    # TARGET is relative
+    TARGET_ABSOLUTE="${PWD}/$TARGET"
+  fi
+
+  #
+  # remove back paths (..), for example
+  # convert /home/../var to absolute /var
+  #
+  _NUM_TRIES=20
+  while [ `echo $TARGET_ABSOLUTE|grep "\.\."|wc -l` = "1" ]; do
+    TARGET_ABSOLUTE=`echo $TARGET_ABSOLUTE|sed "s:/[^/]*/\.\.::"`
+    _NUM_TRIES=$(( $_NUM_TRIES - 1 ))
+    if [ "$_NUM_TRIES" = "0" ]; then break ; fi
+  done
+
+  parse_target "$TARGET_ABSOLUTE" "$WINROOT"
+  if [ "_$RET" = "_ERROR" ]; then
+    echo rg: error parse_target bad target, should be at least
+    echo "    /home, /media/x, /mnt/x, /cygdrive/x, or /cygdrive/c/Users/x"
+    echo No data has been lost nor modified. Aborting
+    exit 1
+  fi
+}
+
+############################################################
+# search_for_repos
+############################################################
+search_for_repos() {
+  TAIL=/$TARGET_REPO
+  TAILGIT=/${TARGET_REPO}.git
+  if [ "_$TARGET_REPO" = "_" ]; then
+    TAIL=
+    TAILGIT=
+  elif [ `echo $TAIL|grep " "|wc -l` = "1" ]; then
+    #
+    # The repo path has spaces, so we need to search
+    # more carefully, each device individually
+    #
+    if [ "_$WINROOT" != "__" ]; then
+      # Windows, start with User home first
+      find -P "/cygdrive/${WINROOT}/Users$TAIL" \
+           "/cygdrive/${WINROOT}/Users$TAILGIT" \
+            -type d -name "*.git" \
+            2> /dev/null \
+            | grep -v "^/cygdrive/./cyg[^/]*/home" \
+            | sed "s:/*.git$::" | sort \
+            1> "${TEMPDIR}/allrepos" \
+            2> /dev/null
+      # Windows, append all drives
+      for d in `ls -d /cygdrive/*|grep -v /cygdrive/$WINROOT`; do
+        find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
+            2> /dev/null \
+            | grep -v "^/cygdrive/./cyg[^/]*/home" \
+            | sed "s:/*.git$::" | sort \
+            1>> "${TEMPDIR}/allrepos" \
+            2> /dev/null
+      done
+    else # Linux
+      for d in `find -P /home /media/* /mnt/* -maxdepth 0 -type d` ; do
+        find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
+            2> /dev/null \
+            | sed "s:/*.git$::" | sort \
+            1>> "${TEMPDIR}/allrepos" \
+            2> /dev/null
+        done
+    fi
+    return
+  fi
+
+  #
+  # otherwise, there are no spaces and we can find in one go
+  #
+  if [ "_$WINROOT" != "__" ]; then
+    # Windows
+    DRIVES="/cygdrive/${WINROOT}/Users$TAIL /cygdrive/${WINROOT}/Users$TAILGIT"
+    for d in `ls -d /cygdrive/*|grep -v /cygdrive/$WINROOT`; do
+      DRIVES="$DRIVES ${d}$TAIL ${d}$TAILGIT"
+    done
+  else # Linux
+    DRIVES="/home$TAIL /home$TAILGIT"
+    for d in `find -P /media/* /mnt/* -maxdepth 0 -type d`; do
+      DRIVES="$DRIVES ${d}$TAIL ${d}$TAILGIT"
+    done
+  fi
+
+  find -P $DRIVES -type d -name "*.git" \
        2> /dev/null \
        | grep -v "^/cygdrive/./cyg[^/]*/home" \
        | sed "s:/*.git$::" | sort \
@@ -67,34 +406,83 @@ search_repos() {
        2> /dev/null
 }
 
+############################################################
+# abstract_data
+############################################################
 abstract_data() {
+  #
+  # grab all unique devices which have git repositories
+  #
   grep "^/\(home\|cygdrive/[a-z]\|media/[^/]*\|mnt/[^/]*\)/.*"\
        "${TEMPDIR}/allrepos" |\
        sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:/\1:" |\
        sort | uniq 1> "${TEMPDIR}/devices"
 
+  #
+  # find the union of all abstract repositories
+  # an abstract is just the path in common, for example
+  #      /home/project
+  #      /media/joker/project.git
+  #      /cygdrive/c/Users/project
+  #      /cygdrive/x/project
+  # the abstract repo would be 'project'
+  #
   grep "^/\(home\|cygdrive/[a-z]\|media/[^/]*\|mnt/[^/]*\)/.*"\
        "${TEMPDIR}/allrepos" |\
        sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:\2:" |\
        sort | uniq 1> "${TEMPDIR}/abstractrepos"
+
+  if [ "_$BACKUP" != "_NO" ]; then
+    echo $TARGET_DEVICE >> "${TEMPDIR}/devices"
+    sort "${TEMPDIR}/devices" | uniq 1> "${TEMPDIR}/tmp"
+    mv "${TEMPDIR}/tmp" "${TEMPDIR}/devices"
+  fi
 }
 
+############################################################
+#
+# label_devices
+#
+# each device may have a .label file at the root of its
+# file tree. The first word of the first line is taken as
+# the devices name. This function stores the devices and
+# names in a file called temp/labels
+#
+############################################################
 label_devices() {
   while read device; do
     LABEL=
     if [ "_$device" = "_/home" -a `echo _$HOSTNAME|wc -c` -ge 3 ]; then
+      #
+      # On Linux, we name anything under /home
+      # by the machine name (HOSTNAME)
+      #
       echo "${HOSTNAME}:${device}" >> "${TEMPDIR}/labels"
-    #elif [ "_`echo $device|grep ^/cygdrive/[a-z]|wc -l`" = "_1" ]; then
     elif [ _`echo $device|grep "^/cygdrive/\([a-z]\|[a-z]/Users\)$"|wc -l` = "_1" ]; then
-      ROOTDIR=`echo "${SYSTEMROOT}_"|cut -c 1|tr '[:upper:]' '[:lower:]'`
-      if [ `echo $device|grep "^/cygdrive/$ROOTDIR"|wc -l` != "0" ]; then
+      if [ `echo $device|grep "^/cygdrive/$WINROOT"|wc -l` != "0" ]; then
+        #
+        # On Windows, we name anything under /cygdrive/c/Users
+        # by the machine name (HOSTNAME). Note that 'c' is only
+        # the typical case, WINROOT is based on the HOMEDRIVE
+        # and HOMEPATH Windows environment variables
+        #
         LABEL="${HOSTNAME}"
       elif [ -r ${device}/.label ]; then
+        #
+        # On Windows, any other device, for example
+        # /cygdrive/x will take the name from a .label
+        # file at the device file system root, if it exists
+        #
         LABEL=`head -1 ${device}/.label|\
              sed "s:^\([a-zA-Z0-9][a-zA-Z0-9]*\).*$:\1:"|\
              grep "^[a-zA-Z0-9][a-zA-Z0-9]*$"`
       fi
       if [ "_$LABEL" = "_" ]; then
+        #
+        # On Windows, if we can't determine the label any
+        # other way, then we'll accept the drive letter.
+        # This sucks actually, because it's likely to change
+        #
         LABEL=`echo $device|\
              sed "s:^/[^/]*/\([a-z]\)$:\1:"|\
              tr '[:lower:]' '[:upper:]'`
@@ -103,24 +491,52 @@ label_devices() {
     elif [ "_`echo $device |\
            grep "^/\(media\|mnt\)/[^/][^/]*$"|\
            wc -l`" = "_1" ]; then
+      #
+      # On Linux, we name external devices found under
+      # /media or /mnt by their .lable file
+      #
       if [ -r ${device}/.label ]; then
         LABEL=`head -1 ${device}/.label|\
              sed "s:^\([a-zA-Z0-9][a-zA-Z0-9]*\).*$:\1:"|\
              grep "^[a-zA-Z0-9][a-zA-Z0-9]*$"`
       fi
+      #
+      # On Linux, if we cannot find the .label file,
+      # we'll accept whatever name the OS (fstab) gave
+      # it. This is not bad at all on most OS. However,
+      # many bare bones OS (Debian) just assign /media/usb0
+      # if it mounts the device at all.
+      #
       if [ "_$LABEL" = "_" ]; then
         LABEL=`echo $device|sed "s:^/[^/]*/\([^/]*\)$:\1:"`
       fi
       echo "${LABEL}:${device}" >> "${TEMPDIR}/labels"
     fi
   done < "${TEMPDIR}/devices"
-  sort "${TEMPDIR}/labels" | uniq > "${TEMPDIR}/tmp" 
+  sort "${TEMPDIR}/labels" | uniq > "${TEMPDIR}/tmp"
   mv "${TEMPDIR}/tmp" "${TEMPDIR}/labels"
 }
 
+############################################################
+#
+# _digits7
+#
+# _digit7( 5 ) ==> 0000005
+#
+############################################################
 _digits7() {
   RET=`echo 0000000$1|sed "s:^.*\(.......\)$:\1:"`
 }
+_left20() {
+  echo $1 |awk -F '\n' '{ printf "%-20s", $1 }'
+}
+_left10() {
+  echo $1 |awk -F '\n' '{ printf "%-10s", $1 }'
+}
+_left5() {
+  echo $1 |awk -F '\n' '{ printf "%-5s", $1 }'
+}
+
 
 ############################################################
 #
@@ -128,15 +544,21 @@ _digits7() {
 #
 # RET example:
 #
-#     0000013:0000007:a1bc13d
+#     0000013:0000007
 #
 ############################################################
 summarize_one_repo() {
   FULLPATH=$1
   TYPE=$2
+
+  if [[ "_$TYPE" = "_BACKUP" ]]; then
+    RET="0000000:0000000"
+    return
+  fi
+
   ORIGDIR="$PWD"
   cd "${FULLPATH}"
-  
+
   # number of git log entries
   git log --oneline --graph  > "${TEMPDIR}/log"
   NUMLOG=`wc -l "${TEMPDIR}/log" | sed "s:^[^0-9]*\([0-9]*\).*$:\1:"`
@@ -158,6 +580,9 @@ summarize_one_repo() {
   RET="${NUMLOG}:${NUMSTAT}"
 }
 
+############################################################
+# summarize_similar_repos
+############################################################
 summarize_similar_repos() {
   repo="$1"
   SHOWSYNC="$2"
@@ -168,6 +593,10 @@ summarize_similar_repos() {
   # for each label:device
   #
   while read dev; do
+    #
+    # For each device, we see if the same repo exists and
+    # if so, what type: bare, working, or future backup
+    #
     LABEL=`echo $dev|cut -d: -f1`
     DEVICE=`echo $dev|cut -d: -f2`
     ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
@@ -181,22 +610,48 @@ summarize_similar_repos() {
       FULLPATH="${DEVICE}/${repo}"
       TYPE=WORK
       ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
+    elif [ "_$BACKUP" != "_NO" -a "_$DEVICE" = "_${TARGET_DEVICE}" -a \
+      `echo ${repo}|grep "^$TARGET_REPO"|wc -l` = "1" ]; then
+        # this device does not have this repository
+        # add a blank space to the abbreviation line
+      FULLPATH="${DEVICE}/${repo}"
+      TYPE=BACKUP
+      ABBREV_LINE="${ABBREV_LINE} "
     else
-      # this device does not have this repository
-      # add a blank space to the abbreviation line
       ABBREV_LINE="${ABBREV_LINE} "
       continue
     fi
 
+    #
+    # get the number of log line and status of particular repo
+    # such as   0000013:0000007
+    #
     summarize_one_repo "$FULLPATH" "$TYPE"
-    # 0000013:0000007
-    echo "${RET}:${LABEL}:${repo}" > "${TEMPLINEDATA}/${LABEL}"
-    # 0000013:0000007:alice:foo/bar
 
+    #
+    # add the label and abstract repo to its own file in
+    # storage, like so:
+    #    0000013:0000007:alice:foo/bar
+    # after synch (if we do so), these files will be copied
+    # and stored permanently.
+    #
+    echo "${RET}:${LABEL}:${repo}" > "${TEMPLINEDATA}/${LABEL}"
+
+    #
+    # also store this repo in a single file (ranksync)
+    # that we will later sort from newest to oldest.
+    # We store the type and full path so that we can later
+    # synch the oldest toward the newest.
+    # Push or pull depending on type: bare or working
+    #
     NUMLOG=`echo $RET|cut -d: -f1`
     NUMSTAT=`echo $RET|cut -d: -f2`
-    echo "${NUMLOG}:${NUMSTAT}:${TYPE}:${FULLPATH}" >> "${TEMPLINE}/ranksync"
+    echo "${RET}:${TYPE}:${FULLPATH}" >> "${TEMPLINE}/ranksync"
 
+    #
+    # Here we group lines with the same log status
+    # such that 12:0:a and 12:0:b becomes 12:0:a,b
+    #
     RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${NUMSTAT}"
     if [ -r "$RANKFILE" ]; then
       echo `head -1 "$RANKFILE"`,$ABBREV > "$RANKFILE"
@@ -208,28 +663,32 @@ summarize_similar_repos() {
       echo "${NUMLOG}:${NUMSTAT}:${ABBREV}" > "$RANKFILE"
     fi
 
+
   done < "${TEMPDIR}/labels"
 
   FIRST=YES
   RET="${ABBREV_LINE}"
-  if [ "_$SHOWSYNC" = "_SYNC" ]; then
+
+  if   [ "_$SHOWSYNC" = "_SYNC" ]; then
     RET=`echo "$RET"|sed "s:.:=:g"`
+  elif [ "_$SHOWSYNC" = "_FAIL" ]; then
+    RET=`echo "$RET"|sed "s:.:!:g"`
   fi
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      REPO=`echo ${repo}|awk '{ printf "%-50s", $1 }'`
+      REPO=`echo ${repo}|awk -F '\n' '{ printf "%-50s", $1 }'`
       RET="${RET} $REPO ${FILE}"
-      #RET="${RET} ${repo} ${FILE}"
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
     fi
   done
-
-  # return RET
 }
 
+############################################################
+# summarize_precomputed_repos
+############################################################
 summarize_precomputed_repos() {
   repo="$1"
 
@@ -241,7 +700,7 @@ summarize_precomputed_repos() {
   while read dev; do
     LABEL=`echo $dev|cut -d: -f1`
     ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
-    
+
     #0000004:0000000:ARCH_201311:foobar
     LINE=`grep ":${repo}$" "${DATADIR}/$LABEL"`
 
@@ -274,16 +733,13 @@ summarize_precomputed_repos() {
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      REPO=`echo ${repo}|awk '{ printf "%-50s", $1 }'`
+      REPO=`echo ${repo}|awk -F '\n' '{ printf "%-50s", $1 }'`
       RET="${RET} $REPO ${FILE}"
-      #RET="${RET} ${repo} ${FILE}"
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
     fi
   done
-
-  # return RET
 }
 
 ##################################################
@@ -301,7 +757,14 @@ synchronize_similar_repos() {
 
   # 0000004:0000001:WORK:/home/alex/.rg/bin
   sort -r "${TEMPLINE}/ranksync" > "${TEMPLINE}/sort"
+
   while read RANK; do
+    #
+    # read the log, status numbers, type (bare,
+    # working, future backup) from latest (top)
+    # to oldest, sorted from ranksync file (from
+    # earlier compare function)
+    #
     LOGNUM=`echo $RANK|cut -d: -f1|sed "s:^0*::"`
     if [ "_$LOGNUM" = "_" ]; then LOGNUM=0; fi
 
@@ -312,6 +775,11 @@ synchronize_similar_repos() {
     FULLPATH=`echo $RANK|cut -d: -f4`
 
     if [ "$LATEST" = "YES" ]; then
+      #
+      # the top line is the (or one of the) latest
+      # clone of the otherwise similar repos. We'll
+      # synchronize all others with this top repo.
+      #
       LATEST_LOGNUM=$LOGNUM
       LATEST_TYPE=$TYPE
       LATEST_FULLPATH=$FULLPATH
@@ -319,11 +787,55 @@ synchronize_similar_repos() {
       continue
     elif [ "_$STATNUM" != "_0" \
       -o "_$LOGNUM" = "_$LATEST_LOGNUM" ]; then
+      #
       # can only fast forward a clean repo
       # and dont bother synching already synched
+      #
       continue
+    elif [ "_$TYPE" = "_BACKUP" ]; then
+      #
+      # This repo does not yet exist. The user
+      # has requested a backup in on this device
+      # in this target sub-path. Bare flag and tail
+      # are trick values. For a working repo, these
+      # values are blank and will have no effect. For
+      # a bare repo, they'll add a "clone --bare" and
+      # a ".git" suffix to the repo directory name.
+      #
+      BAREFLAG=
+      BARETAIL=
+      if [[ "_$BACKUP" = "_BARE" ]]; then
+        BAREFLAG=" --bare "
+        BARETAIL=".git"
+      fi
+      #
+      # Parent path is one above the target repo.
+      # If we want to create foo/bar/baz.git,
+      # then we must first ensure that foo/bar
+      # exists. Then we can clone baz into bar.
+      #
+      PARENTPATH=`echo $FULLPATH|sed "s:/[^/]*$::"`
+      echo ${FULLPATH}${BARETAIL} clone of $LATEST_FULLPATH >> "${TEMPDIR}/gitstdout"
+      if [ "_$DRYRUN" = "_YES" ]; then
+        echo "    ${FULLPATH}${BARETAIL} clone of $LATEST_FULLPATH"
+      elif [ -d "${FULLPATH}" -o -d "${FULLPATH}${BARETAIL}" ]; then
+        #
+        # Check that we can actually clone here. Git will refuse
+        # to clone into an existing directory (god bless).
+        #
+        RET="FAIL"
+      else
+        mkdir -p "$PARENTPATH"
+        git clone $BAREFLAG "$LATEST_FULLPATH" "${FULLPATH}${BARETAIL}" \
+          1>> "${TEMPDIR}/gitstdout" 2>> "${TEMPDIR}/gitstderr"
+        RET="SYNC"
+      fi
     elif [ "_$TYPE" = "_WORK" ]; then
-      # then we have to pull
+      #
+      # This repo already exists, but it is old
+      # out-of-date. It is a working directory,
+      # so we have to __pull__ from the latest
+      #
       cd "$FULLPATH"
       echo $FULLPATH pull from $LATEST_FULLPATH >> "${TEMPDIR}/gitstdout"
       if [ "_$DRYRUN" = "_YES" ]; then
@@ -334,7 +846,11 @@ synchronize_similar_repos() {
       fi
       RET="SYNC"
     elif [ "_$TYPE" = "_BARE" ]; then
-      # then we have to push
+      #
+      # This repo already exists, but it is old
+      # out-of-date. It is a bare directory,
+      # so we have to __push__ from the latest
+      #
       cd "$LATEST_FULLPATH"
       echo $LATEST_FULLPATH push to $FULLPATH >> "${TEMPDIR}/gitstdout"
       if [ "_$DRYRUN" = "_YES" ]; then
@@ -349,19 +865,20 @@ synchronize_similar_repos() {
   cd "${SYNC_ORIGDIR}"
 }
 
+############################################################
+# compare_repos
+############################################################
 compare_repos() {
-  VERBOSE=NO
-
   TEMPLINE=${TEMPDIR}/line
   TEMPLINEDATA=${TEMPDIR}/linedata
   while read repo; do
-
     #
-    # test only 'rg' repos
+    # cleanup the TEMPLINE and TEMPLINEDATA directories
+    # This is necessary, because we will enter the
+    # compare_repos function many times: Perhaps twice,
+    # before and after synchronization, and for each
+    # abstract (common) repo.
     #
-    #if [ "_`echo $repo|grep rg|wc -l`" != "_1" ]; then continue; fi
-
-
     if [ -d "${TEMPLINE}" ]; then
          rm -rf "${TEMPLINE}"/*
     else mkdir -p "${TEMPLINE}"
@@ -372,16 +889,39 @@ compare_repos() {
     else mkdir -p "${TEMPLINEDATA}"
     fi
 
+    #
+    # report a single log status line for all similar repos
+    #
+    #  ryu  foo/bar 5:8:u > 3:0:r,y
+    # cry z my/repo 12:0:y > 10:3:c > 9:0:r,z
+    #
     summarize_similar_repos "$repo" "NoSync"
     if [ "_$QUIET" = "_NO" ]; then echo "$RET"
     else PREVLINE=$RET
     fi
 
+    #
+    # synchronize any clean (not status lines:
+    #    modified, removed, added, untracked)
+    # up to the latest similar repository. Example:
+    #
+    #  ryu  foo/bar 5:8:u > 5:0:r,y
+    # cry z my/repo 12:0:r,y,z > 10:3:c
+    #
     synchronize_similar_repos "$repo"
-    if [ "_$RET" = "_SYNC" ]; then
+    if [ "_$RET" = "_SYNC" -o "_$RET" = "_FAIL" ]; then
       if [ "_$QUIET" = "_YES" ]; then echo $PREVLINE ; fi
       rm -rf "${TEMPLINE}"/* "${TEMPLINEDATA}"/*
-      summarize_similar_repos "$repo" "SYNC"
+      #
+      # if there was any synchronization,
+      # then compare and display again
+      #
+      #  ryu  foo/bar 5:8:u > 3:0:r,y
+      # ===== foo/bar 5:8:u > 5:0:r,y
+      # cry z my/repo 12:0:y > 10:3:c > 9:0:r,z
+      # ===== my/repo 12:0:r,y,z > 10:3:c
+      #
+      summarize_similar_repos "$repo" "$RET"
       echo "$RET"
     fi
 
@@ -395,11 +935,28 @@ compare_repos() {
   done < "${TEMPDIR}/abstractrepos"
 }
 
+############################################################
+# update_list
+############################################################
 update_list() {
-  mv "${TEMPDATA}"/* "${DATADIR}"
+  #
+  # move the new temp data, overwriting only files (devices)
+  # that have been recently updated, if there are any at all
+  #
+  if [ `ls "${TEMPDATA}"|wc -l` != "0" ]; then
+    mv -f "${TEMPDATA}"/* "${DATADIR}"
+  fi
 }
 
+############################################################
+# list_global
+############################################################
 list_global() {
+  #if ! [ -d "$DATADIR" -a -r "${TEMPDIR}/labels" -a "${TEMPDIR}/abstractrepos" ]; then
+  #  echo "rg: error there is no overview data. Try running 'rg' with no flags"
+  #  return
+  #fi
+
   TEMPLINE=${TEMPDIR}/line
   #
   # cleanup the comparisons
@@ -425,16 +982,23 @@ list_global() {
   done < "${TEMPDIR}/abstractrepos"
 }
 
+############################################################
+# cleanup
+############################################################
 cleanup() {
   rm -rf "${TEMPDIR}"
 }
 
+############################################################
+# main
+############################################################
 main() {
   initialize
   if [ "_$LIST" = "_YES" ]; then
     list_global
   else
-    search_repos
+    normalize_target
+    search_for_repos
     abstract_data
     label_devices
     compare_repos
@@ -444,3 +1008,5 @@ main() {
 }
 
 main
+
+# parse_target_test
