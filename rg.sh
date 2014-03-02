@@ -38,6 +38,9 @@
 #
 # rg -q      = quiet. Show only synchronizations
 #
+# rg -t      = Test. No list, no synch, just
+#              perform unit tests
+#
 #
 # ================
 # Backup and clone
@@ -50,10 +53,22 @@
 #              to TARGET as working repos
 #
 ###################################################
+#
+# INSTALLATION
+#
+# On Windows/Cygwin, I recommend instead of adding
+# the script to PATH, to create an alias of the
+# form:
+#
+#   alias rg='export COLUMNS;bash $HOME/.rg/src/rg.sh'
+#
+###################################################
 
+DEFAULT_REPO_WIDTH=65
 DRYRUN=NO
 QUIET=NO
 LIST=NO
+TEST=NO
 TARGET=NO
 BACKUP=NO
 
@@ -62,9 +77,10 @@ BACKUP=NO
 ############################################################
 get_arg() {
   if [ `echo "${1}_"|sed "s:^\(.\).*:\1:g"` = "-" ]; then
-    if [ `echo "$1"|grep d|wc -l` = "1" ]; then DRYRUN=YES   ; fi
-    if [ `echo "$1"|grep l|wc -l` = "1" ]; then LIST=YES     ; fi
-    if [ `echo "$1"|grep q|wc -l` = "1" ]; then QUIET=YES    ; fi
+    if [ `echo "$1"|grep d|wc -l` = "1" ]; then DRYRUN=YES    ; fi
+    if [ `echo "$1"|grep l|wc -l` = "1" ]; then LIST=YES      ; fi
+    if [ `echo "$1"|grep q|wc -l` = "1" ]; then QUIET=YES     ; fi
+    if [ `echo "$1"|grep t|wc -l` = "1" ]; then TEST=YES      ; fi
     if [ `echo "$1"|grep b|wc -l` = "1" ]; then _BACKBARE=YES ; fi
     if [ `echo "$1"|grep w|wc -l` = "1" ]; then _BACKWORK=YES ; fi
   elif [ "$TARGET" = "NO" ]; then
@@ -102,9 +118,46 @@ initialize() {
   WINROOT=`echo "${HOMEDRIVE}_"|cut -c 1|\
     tr '[:upper:]' '[:lower:]'`
 
+  #
+  # Get the column width. With Windows/Cygwin, from an
+  # interactive bash call to a very simple script which
+  # returns the $COLUMNS interactive env var. Does not
+  # work in most Linux, barely works in Cygwin.
+  # With Linux, from calling 'resize' which exports
+  # the $COLUMNS env var. Does not work in Cygwin.
+  #
+  # Cygwin Suggestion:
+  #
+  #      alias rg='export COLUMNS;bash ~/.rg/src/rg.sh'
+  #
+  # Also in Windows, we need the HOME variable to henseforth
+  # point to something like /cygdrive/c/Users/me
+  #
   if [ "_$WINROOT" != "__" ]; then
     # Windows
-    HOME=/cygdrive/${WINROOT}$(echo "$HOMEPATH"|sed "s:\\\\:/:g")
+    if [ "_$COLUMNS" = "_" ]; then
+      #
+      # reading COLUMNS from an interactive
+      # shell is totally unreliable
+      #
+      #COLUMNS=$(bash -i ${HOME}/.rg/src/cygwin.columns.bash)
+      echo rg: Terminal width unknown. Suggest export COLUMNS
+      echo rg: alias rg='export COLUMNS;bash ~/.rg/src/rg.sh'
+    fi
+    HOME=/cygdrive/${WINROOT}`echo "$HOMEPATH"|sed 's:\\\\:/:g'`
+  elif [ "_$COLUMNS" = "_" ]; then
+    eval $( resize )
+  fi
+
+  #
+  # fit repo nicely in terminal window
+  # Repo path shall be between 20 and 90 char wide
+  #
+  if [[ "_$COLUMNS" =  "_" ]]; then WIDTH_REPO=$DEFAULT_REPO_WIDTH
+  elif [[ $COLUMNS -le  60 ]]; then WIDTH_REPO=35
+  elif [[ $COLUMNS -le 100 ]]; then WIDTH_REPO=$(( $COLUMNS - 25 ))
+  elif [[ $COLUMNS -gt 100 ]]; then WIDTH_REPO=75
+  else WIDTH_REPO=$DEFAULT_REPO_WIDTH
   fi
 }
 
@@ -189,24 +242,24 @@ parse_target_assert() {
   EXPECT_REPO=$4
   EXPECT_RET=$5
   parse_target "$TARGET_ABSOLUTE" "$WINROOT"
-      A=$(_left20 "\"${TARGET_ABSOLUTE}\"")
-      B=$(_left5    "${WINROOT}")
+      A=$(_left 20 "\"${TARGET_ABSOLUTE}\"")
+      B=$(_left  5  "${WINROOT}")
   if [ "_$EXPECT_DEVICE" = "_$TARGET_DEVICE" -a \
        "_$EXPECT_REPO"   = "_$TARGET_REPO" -a \
        "_$EXPECT_RET"    = "_$RET" ]; then
-      C=$(_left20 "\"${TARGET_DEVICE}\"")
-      D=$(_left10 "\"${TARGET_REPO}\"")
-      E=$(_left10   "${RET}")
-      #echo "OK   ${A} ${B} ${C} ${D} ${E}"
+      C=$(_left 20 "\"${TARGET_DEVICE}\"")
+      D=$(_left  5 "\"${TARGET_REPO}\"")
+      E=$(_left  5   "${RET}")
+      echo "OK   ${A} ${B} ${C} ${D} ${E}"
   else
-      C=$(_left20 "\"${TARGET_DEVICE}\"")
-      D=$(_left10 "\"${TARGET_REPO}\"")
-      E=$(_left10   "${RET}")
+      C=$(_left 20 "\"${TARGET_DEVICE}\"")
+      D=$(_left  5 "\"${TARGET_REPO}\"")
+      E=$(_left  5   "${RET}")
       echo "FAIL ${A} ${B} ${C} ${D} ${E}"
-      A=$(_left20 "Expected:")
-      C=$(_left20 "\"${EXPECT_DEVICE}\"")
-      D=$(_left10 "\"${EXPECT_REPO}\"")
-      E=$(_left10   "${EXPECT_RET}")
+      A=$(_left 20 "Expected:")
+      C=$(_left 20 "\"${EXPECT_DEVICE}\"")
+      D=$(_left  5 "\"${EXPECT_REPO}\"")
+      E=$(_left  5   "${EXPECT_RET}")
       echo "   ${A}         ${C} ${D} ${E}"
   fi
 }
@@ -527,14 +580,37 @@ label_devices() {
 _digits7() {
   RET=`echo 0000000$1|sed "s:^.*\(.......\)$:\1:"`
 }
-_left20() {
-  echo $1 |awk -F '\n' '{ printf "%-20s", $1 }'
-}
-_left10() {
-  echo $1 |awk -F '\n' '{ printf "%-10s", $1 }'
-}
-_left5() {
-  echo $1 |awk -F '\n' '{ printf "%-5s", $1 }'
+
+############################################################
+#
+# _left( WIDTH TEXT )
+#
+# RETURNS stdout
+#
+# Example usage:
+#
+#      echo $(_left 20 "hello world")
+#      echo $(_left 20 "\"${TARGET}\"")
+#
+############################################################
+_left() {
+  if [ $# -ne 2 ]; then echo rg: _left requires two args; return; fi
+  WIDTH=$1
+  TEXT=$2
+  if   [ $WIDTH -ge 70 ]; then FMT='{ printf "%-70s", $1 }'
+  elif [ $WIDTH -ge 60 ]; then FMT='{ printf "%-60s", $1 }'
+  elif [ $WIDTH -ge 50 ]; then FMT='{ printf "%-50s", $1 }'
+  elif [ $WIDTH -ge 40 ]; then FMT='{ printf "%-40s", $1 }'
+  elif [ $WIDTH -ge 30 ]; then FMT='{ printf "%-30s", $1 }'
+  elif [ $WIDTH -ge 25 ]; then FMT='{ printf "%-25s", $1 }'
+  elif [ $WIDTH -ge 20 ]; then FMT='{ printf "%-20s", $1 }'
+  elif [ $WIDTH -ge 15 ]; then FMT='{ printf "%-15s", $1 }'
+  elif [ $WIDTH -ge 10 ]; then FMT='{ printf "%-10s", $1 }'
+  elif [ $WIDTH -ge  5 ]; then FMT='{ printf  "%-5s", $1 }'
+  elif [ $WIDTH -ge  2 ]; then FMT='{ printf  "%-2s", $1 }'
+  elif [ $WIDTH -ge  1 ]; then FMT='{ printf  "%-1s", $1 }'
+  fi
+  echo $2|awk -F '\n' "$FMT"
 }
 
 
@@ -677,8 +753,7 @@ summarize_similar_repos() {
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      REPO=`echo ${repo}|awk -F '\n' '{ printf "%-50s", $1 }'`
-      RET="${RET} $REPO ${FILE}"
+      RET="${RET} $(_left $WIDTH_REPO "$repo") ${FILE}"
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
@@ -733,8 +808,7 @@ summarize_precomputed_repos() {
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      REPO=`echo ${repo}|awk -F '\n' '{ printf "%-50s", $1 }'`
-      RET="${RET} $REPO ${FILE}"
+      RET="${RET} $(_left $WIDTH_REPO "$repo") ${FILE}"
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
@@ -994,7 +1068,9 @@ cleanup() {
 ############################################################
 main() {
   initialize
-  if [ "_$LIST" = "_YES" ]; then
+  if [ "_$TEST" = "_YES" ]; then
+    parse_target_test
+  elif [ "_$LIST" = "_YES" ]; then
     list_global
   else
     normalize_target
@@ -1008,5 +1084,3 @@ main() {
 }
 
 main
-
-# parse_target_test
