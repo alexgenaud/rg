@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/dash
 
 #################################################
 #
@@ -60,7 +60,7 @@
 # the script to PATH, to create an alias of the
 # form:
 #
-#   alias rg='export COLUMNS;bash $HOME/.rg/src/rg.sh'
+#   alias rg='export COLUMNS;dash $HOME/.rg/src/rg.sh'
 #
 ###################################################
 
@@ -99,6 +99,37 @@ if [ $# -ge 2 -a "_$TARGET" = "_NO" ]; then TARGET="$2" ; fi
 ############################################################
 initialize() {
   #
+  # on a windows machine, typically, WINROOT=c
+  # on a Linux machine, we will set WINROOT=_
+  #
+  # calling 'resize' in Linux should export
+  # the $COLUMNS env var. Does not work in Cygwin.
+  # For pretty terminal width in Cygwin Suggestion:
+  #
+  #      alias rg='export COLUMNS;dash ~/.rg/src/rg.sh'
+  #
+  # In Windows, we need the HOME variable to henseforth
+  # point to something like /cygdrive/c/Users/me
+  #
+  WINROOT='_'
+  if [ "_${HOMEDRIVE}" != "_" ]; then # Windows
+    WINROOT=`echo "${HOMEDRIVE}_"|cut -c 1|\
+      tr '[:upper:]' '[:lower:]'`
+    HOME=/cygdrive/${WINROOT}/Users/$USERNAME
+    if [ "_$COLUMNS" = "_" ]; then
+      #
+      # reading COLUMNS from an interactive
+      # shell is totally unreliable
+      #
+      #COLUMNS=$(bash -i ${HOME}/.rg/src/cygwin.columns.bash)
+      echo rg: Terminal width unknown. Suggest export COLUMNS
+      echo rg: alias rg='export COLUMNS;dash ~/.rg/src/rg.sh'
+    fi
+  elif [ "_$COLUMNS" = "_" ]; then # Linux
+    eval $( resize )
+  fi
+
+  #
   # create some persistent and temp directories
   #
   # NB: HOME is the Linux/Cygwin HOME
@@ -111,52 +142,15 @@ initialize() {
   mkdir -p "${DATADIR}"
   mkdir -p "${TEMPDATA}"
 
-  #
-  # on a windows machine, typically, WINROOT=c
-  # on a Linux machine, we expect WINROOT=_
-  #
-  WINROOT=`echo "${HOMEDRIVE}_"|cut -c 1|\
-    tr '[:upper:]' '[:lower:]'`
-
-  #
-  # Get the column width. With Windows/Cygwin, from an
-  # interactive bash call to a very simple script which
-  # returns the $COLUMNS interactive env var. Does not
-  # work in most Linux, barely works in Cygwin.
-  # With Linux, from calling 'resize' which exports
-  # the $COLUMNS env var. Does not work in Cygwin.
-  #
-  # Cygwin Suggestion:
-  #
-  #      alias rg='export COLUMNS;bash ~/.rg/src/rg.sh'
-  #
-  # Also in Windows, we need the HOME variable to henseforth
-  # point to something like /cygdrive/c/Users/me
-  #
-  if [ "_$WINROOT" != "__" ]; then
-    # Windows
-    if [ "_$COLUMNS" = "_" ]; then
-      #
-      # reading COLUMNS from an interactive
-      # shell is totally unreliable
-      #
-      #COLUMNS=$(bash -i ${HOME}/.rg/src/cygwin.columns.bash)
-      echo rg: Terminal width unknown. Suggest export COLUMNS
-      echo rg: alias rg='export COLUMNS;bash ~/.rg/src/rg.sh'
-    fi
-    HOME=/cygdrive/${WINROOT}`echo "$HOMEPATH"|sed 's:\\\\:/:g'`
-  elif [ "_$COLUMNS" = "_" ]; then
-    eval $( resize )
-  fi
 
   #
   # fit repo nicely in terminal window
   # Repo path shall be between 20 and 90 char wide
   #
-  if [[ "_$COLUMNS" =  "_" ]]; then WIDTH_REPO=$DEFAULT_REPO_WIDTH
-  elif [[ $COLUMNS -le  60 ]]; then WIDTH_REPO=35
-  elif [[ $COLUMNS -le 100 ]]; then WIDTH_REPO=$(( $COLUMNS - 25 ))
-  elif [[ $COLUMNS -gt 100 ]]; then WIDTH_REPO=75
+  if [ "_$COLUMNS" =  "_" ]; then WIDTH_REPO=$DEFAULT_REPO_WIDTH
+  elif [ $COLUMNS -le  60 ]; then WIDTH_REPO=35
+  elif [ $COLUMNS -le 100 ]; then WIDTH_REPO=$(( $COLUMNS - 25 ))
+  elif [ $COLUMNS -gt 100 ]; then WIDTH_REPO=75
   else WIDTH_REPO=$DEFAULT_REPO_WIDTH
   fi
 }
@@ -186,9 +180,9 @@ parse_target() {
   TARGET_ABSOLUTE=$1
   WINROOT=$2
 
-  if [ "_$WINROOT" == "__" ]; then
+  if [ "_$WINROOT" = "__" ]; then
     #
-    # assume Linux macine
+    # assume Linux machine
     #
     TARGET_DEVICE=`echo $TARGET_ABSOLUTE |\
        grep    "^/\(home\|media/[^/]*\|mnt/[^/]*\)" |\
@@ -242,25 +236,18 @@ parse_target_assert() {
   EXPECT_REPO=$4
   EXPECT_RET=$5
   parse_target "$TARGET_ABSOLUTE" "$WINROOT"
-      A=$(_left 20 "\"${TARGET_ABSOLUTE}\"")
-      B=$(_left  5  "${WINROOT}")
   if [ "_$EXPECT_DEVICE" = "_$TARGET_DEVICE" -a \
        "_$EXPECT_REPO"   = "_$TARGET_REPO" -a \
        "_$EXPECT_RET"    = "_$RET" ]; then
-      C=$(_left 20 "\"${TARGET_DEVICE}\"")
-      D=$(_left  5 "\"${TARGET_REPO}\"")
-      E=$(_left  5   "${RET}")
-      echo "OK   ${A} ${B} ${C} ${D} ${E}"
+      printf 'OK   %-20s %-5s %-20s %-5s %-5s\n' \
+        "\"${TARGET_ABSOLUTE}\"" "${WINROOT}" \
+        "\"${TARGET_DEVICE}\"" "\"${TARGET_REPO}\"" "${RET}"
   else
-      C=$(_left 20 "\"${TARGET_DEVICE}\"")
-      D=$(_left  5 "\"${TARGET_REPO}\"")
-      E=$(_left  5   "${RET}")
-      echo "FAIL ${A} ${B} ${C} ${D} ${E}"
-      A=$(_left 20 "Expected:")
-      C=$(_left 20 "\"${EXPECT_DEVICE}\"")
-      D=$(_left  5 "\"${EXPECT_REPO}\"")
-      E=$(_left  5   "${EXPECT_RET}")
-      echo "   ${A}         ${C} ${D} ${E}"
+      printf 'FAIL %-20s %-5s %-20s %-5s %-5s\n' \
+        "\"${TARGET_ABSOLUTE}\"" "${WINROOT}" \
+        "\"${TARGET_DEVICE}\"" "\"${TARGET_REPO}\"" "${RET}"
+      printf '  Expected:%-20s %-20s %-5s %-5s\n' ' ' \
+        "\"${EXPECT_DEVICE}\"" "\"${EXPECT_REPO}\"" "${EXPECT_RET}"
   fi
 }
 
@@ -380,7 +367,6 @@ normalize_target() {
     _NUM_TRIES=$(( $_NUM_TRIES - 1 ))
     if [ "$_NUM_TRIES" = "0" ]; then break ; fi
   done
-
   parse_target "$TARGET_ABSOLUTE" "$WINROOT"
   if [ "_$RET" = "_ERROR" ]; then
     echo rg: error parse_target bad target, should be at least
@@ -581,38 +567,6 @@ _digits7() {
   RET=`echo 0000000$1|sed "s:^.*\(.......\)$:\1:"`
 }
 
-############################################################
-#
-# _left( WIDTH TEXT )
-#
-# RETURNS stdout
-#
-# Example usage:
-#
-#      echo $(_left 20 "hello world")
-#      echo $(_left 20 "\"${TARGET}\"")
-#
-############################################################
-_left() {
-  if [ $# -ne 2 ]; then echo rg: _left requires two args; return; fi
-  WIDTH=$1
-  TEXT=$2
-  if   [ $WIDTH -ge 70 ]; then FMT='{ printf "%-70s", $1 }'
-  elif [ $WIDTH -ge 60 ]; then FMT='{ printf "%-60s", $1 }'
-  elif [ $WIDTH -ge 50 ]; then FMT='{ printf "%-50s", $1 }'
-  elif [ $WIDTH -ge 40 ]; then FMT='{ printf "%-40s", $1 }'
-  elif [ $WIDTH -ge 30 ]; then FMT='{ printf "%-30s", $1 }'
-  elif [ $WIDTH -ge 25 ]; then FMT='{ printf "%-25s", $1 }'
-  elif [ $WIDTH -ge 20 ]; then FMT='{ printf "%-20s", $1 }'
-  elif [ $WIDTH -ge 15 ]; then FMT='{ printf "%-15s", $1 }'
-  elif [ $WIDTH -ge 10 ]; then FMT='{ printf "%-10s", $1 }'
-  elif [ $WIDTH -ge  5 ]; then FMT='{ printf  "%-5s", $1 }'
-  elif [ $WIDTH -ge  2 ]; then FMT='{ printf  "%-2s", $1 }'
-  elif [ $WIDTH -ge  1 ]; then FMT='{ printf  "%-1s", $1 }'
-  fi
-  echo $2|awk -F '\n' "$FMT"
-}
-
 
 ############################################################
 #
@@ -627,7 +581,7 @@ summarize_one_repo() {
   FULLPATH=$1
   TYPE=$2
 
-  if [[ "_$TYPE" = "_BACKUP" ]]; then
+  if [ "_$TYPE" = "_BACKUP" ]; then
     RET="0000000:0000000"
     return
   fi
@@ -739,7 +693,6 @@ summarize_similar_repos() {
       echo "${NUMLOG}:${NUMSTAT}:${ABBREV}" > "$RANKFILE"
     fi
 
-
   done < "${TEMPDIR}/labels"
 
   FIRST=YES
@@ -753,7 +706,7 @@ summarize_similar_repos() {
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      RET="${RET} $(_left $WIDTH_REPO "$repo") ${FILE}"
+      RET=$(printf "${RET} %-${WIDTH_REPO}s $FILE" "$repo")
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
@@ -808,7 +761,7 @@ summarize_precomputed_repos() {
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
-      RET="${RET} $(_left $WIDTH_REPO "$repo") ${FILE}"
+      RET=$(printf "${RET} %-${WIDTH_REPO}s $FILE" "$repo")
       FIRST=NO
     else
       RET="${RET} > ${FILE}"
@@ -878,7 +831,7 @@ synchronize_similar_repos() {
       #
       BAREFLAG=
       BARETAIL=
-      if [[ "_$BACKUP" = "_BARE" ]]; then
+      if [ "_$BACKUP" = "_BARE" ]; then
         BAREFLAG=" --bare "
         BARETAIL=".git"
       fi
