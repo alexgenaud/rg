@@ -28,18 +28,20 @@
 # Report and Synchronize
 # ======================
 #
-# rg         = check all drives and /home,
-#              synchronize and report comparison
+# rg    [ TARGET ]   Check all drives and
+#                      /home, synchronize and
+#                      report comparison
 #
-# rg -d      = dry run. Report but do not
-#              synchronize
+# rg -d [ TARGET ]   Dry run. Report but
+#                      do not synchronize
 #
-# rg -l      = list. Report only
+# rg -l [ TARGET ]   List. Report only
 #
-# rg -q      = quiet. Show only synchronizations
+# rg -q [ TARGET ]   Quiet. Show only
+#                      synchronizations
 #
-# rg -t      = Test. No list, no synch, just
-#              perform unit tests
+# rg -t [ TARGET ]   Test. No list, no synch,
+#                      just perform unit tests
 #
 #
 # ================
@@ -92,6 +94,32 @@ get_arg() {
 }
 if   [ $# -ge 1 ]; then get_arg "$1" ; fi
 if [ $# -ge 2 -a "_$TARGET" = "_NO" ]; then TARGET="$2" ; fi
+
+#
+# Backup flag requires a unique TARGET
+#
+if [ "_$BACKUP" != "_NO" ]; then
+  if [ "_$TARGET" = "_NO" ]; then
+    echo rg: error: $BACKUP clone requires a target.
+    echo "    Cloning all repositories into curent directory"
+    echo "    requires an explicit dot ('.') such as:"
+    echo
+    if [ "_$BACKUP" = "_BARE" ]; then
+         echo "     rg -b ."
+    else echo "     rg -w ."   ; fi
+    echo
+    exit 1
+  elif [ "_$TARGET" = "_/" ]; then
+    echo rg: error: $BACKUP clone requires a unique target in
+    echo "    which to clone all repositories into, such as:"
+    echo
+    if [ "_$BACKUP" = "_BARE" ]; then
+         echo "     rg -b /home"
+    else echo "     rg -w /home" ; fi
+    echo
+    exit 1
+  fi
+fi
 
 
 ############################################################
@@ -148,8 +176,8 @@ initialize() {
   # Repo path shall be between 20 and 90 char wide
   #
   if [ "_$COLUMNS" =  "_" ]; then WIDTH_REPO=$DEFAULT_REPO_WIDTH
-  elif [ $COLUMNS -le  60 ]; then WIDTH_REPO=35
-  elif [ $COLUMNS -le 100 ]; then WIDTH_REPO=$(( $COLUMNS - 25 ))
+  elif [ $COLUMNS -le  60 ]; then WIDTH_REPO=20
+  elif [ $COLUMNS -le 100 ]; then WIDTH_REPO=$(( $COLUMNS - 40 ))
   elif [ $COLUMNS -gt 100 ]; then WIDTH_REPO=75
   else WIDTH_REPO=$DEFAULT_REPO_WIDTH
   fi
@@ -330,43 +358,90 @@ parse_target_test() {
 }
 
 ############################################################
+#
 # normalize_target
+#
+# RETURN
+#     TARGET_DEVICE
+#     TARGET_REPO
+#
+# or exits with a message
+#
+# TARGET_DEVICE is only important when cloning,
+#   either as bulk bare (-b backup) or
+#   bulk working directory (-w recover).
+#   Example TARGET_DEVICE include: /home, /media/foo
+#   /mnt/bar, /cygdrive/baz, or /cygdrive/c/Users
+#
+# TARGET_REPO is always significant. This is the
+#   abstract repo such as alex/Music. In this case,
+#   further processing would include alex/Music/Violin
+#   but not alex/Photos/...
+#
+# Put together the TARGET resolves a TARGET_ABSOLUTE
+# from which the TARGET_DEVICE and TARGET_REPO derive
+#
+# $ cd $HOME; rg Music
+#
+#    TARGET          = Music
+#    TARGET_ABSOLUTE = /home/alex/Music
+#    TARGET_DEVICE   = /home
+#    TARGET_REPO     = alex/Music
+#
+#
+# This function converts a relative TARGET to an
+# absolute TARGET_ABSOLUTE and the subfunction
+# 'parse_target' does all the heavy lifting.
+#
 ############################################################
 normalize_target() {
   #
-  # if TARGET is not set, the assume the home directory
+  # if TARGET is not set, then assume the root directory
+  # in other words, synchronize and list everything
   #
-  if [ "_$TARGET" = "_" -o "_$TARGET" = "_NO" ]; then
-    TARGET=$HOME
-  elif [ "_$TARGET" = "_/" ]; then
-    TARGET=$( echo $HOME|sed "s:/[^/]*$::" )
+  if [ "_$TARGET" = "_"  -o "_$TARGET" = "_NO" -o \
+       "_$TARGET" = "_/" -o "_$TARGET" = "_/." ]; then
+    TARGET_DEVICE=$( echo $HOME|sed "s:/[^/]*$::" )
+    TARGET_REPO=
+    return
   fi
 
-  #
-  # clean up trailing /
-  #
-  TARGET=`echo $TARGET|sed "s:/*$::"`
+  if [ "_$TARGET" = "_." ]; then
+    #
+    # if the TARGET is a single dot, then it represents
+    # the current working directory
+    #
+    TARGET_ABSOLUTE="$PWD"
+  else
+    #
+    # otherwise, remove any trailing slashes or a single
+    # trailing dot, but note that .. has special meaning
+    #
+    TARGET=`echo "$TARGET"|sed -e "s:\([^\.]\)\.$:\1:" -e "s:/*$::"`
 
-  #
-  # find absolute path from relative path, for example
-  # relative path foo/bar might be absolute /home/foo/bar
-  #
-  TARGET_ABSOLUTE="$TARGET"
-  if [ "0" = `echo $TARGET|grep "^/"|wc -l` ]; then
-    # TARGET is relative
-    TARGET_ABSOLUTE="${PWD}/$TARGET"
+    #
+    # find absolute path from relative path, for example
+    # relative path foo/bar might be absolute /home/foo/bar
+    #
+    if [ "0" = `echo $TARGET|grep "^/"|wc -l` ]; then
+      # TARGET is relative
+      TARGET_ABSOLUTE="${PWD}/$TARGET"
+    else
+      TARGET_ABSOLUTE="$TARGET"
+    fi
+
+    #
+    # remove back paths (..), for example
+    # convert /home/../var to absolute /var
+    #
+    _NUM_TRIES=20
+    while [ `echo $TARGET_ABSOLUTE|grep "\.\."|wc -l` = "1" ]; do
+      TARGET_ABSOLUTE=`echo $TARGET_ABSOLUTE|sed "s:/[^/]*/\.\.::"`
+      _NUM_TRIES=$(( $_NUM_TRIES - 1 ))
+      if [ "$_NUM_TRIES" = "0" ]; then break ; fi
+    done
   fi
 
-  #
-  # remove back paths (..), for example
-  # convert /home/../var to absolute /var
-  #
-  _NUM_TRIES=20
-  while [ `echo $TARGET_ABSOLUTE|grep "\.\."|wc -l` = "1" ]; do
-    TARGET_ABSOLUTE=`echo $TARGET_ABSOLUTE|sed "s:/[^/]*/\.\.::"`
-    _NUM_TRIES=$(( $_NUM_TRIES - 1 ))
-    if [ "$_NUM_TRIES" = "0" ]; then break ; fi
-  done
   parse_target "$TARGET_ABSOLUTE" "$WINROOT"
   if [ "_$RET" = "_ERROR" ]; then
     echo rg: error parse_target bad target, should be at least
@@ -967,11 +1042,59 @@ compare_repos() {
 ############################################################
 update_list() {
   #
+  # only update the list if we have a full list,
+  # all attached devices and no target repo filtering.
+  #
+  #
+  # After running rg, we've likely modified the list, so if we
+  # have not synched and reported the entire list, we'll
+  # purge the saves .latest and flag the data as stale
+  #
+  if [ "_$TARGET_REPO" != "_" ]; then
+    #
+    #  if partial synch
+    #
+    if [ -r "${DATADIR}/.latest" ]; then
+      touch "${DATADIR}/.stale"
+    fi
+    #
+    # do not update the .rg/data directory
+    # with partial junk.
+    #
+    return;
+  else
+    #
+    # if synched the full list
+    #
+    # it would be nice if we generated a full .latest
+    # while going through all repos. That's for another
+    # day. For now, we remove, and let the list_global
+    # function build it when using 'rg -l'
+    #
+    if [ -r "${DATADIR}/.latest" ]; then
+      rm "${DATADIR}/.latest"
+    fi
+    #
+    # the .latest is also no longer stale,
+    # indeed, it's freshly gone
+    #
+    if [ -r "${DATADIR}/.stale" ]; then
+      rm "${DATADIR}/.stale"
+    fi
+  fi
+
+  #
   # move the new temp data, overwriting only files (devices)
   # that have been recently updated, if there are any at all
   #
   if [ `ls "${TEMPDATA}"|wc -l` != "0" ]; then
     mv -f "${TEMPDATA}"/* "${DATADIR}"
+  fi
+  if [ -r "${DATADIR}/.latest" ]; then
+    rm "${DATADIR}/.latest"
+  fi
+  if [ -r "${DATADIR}/.stale" ]; then
+    rm "${DATADIR}/.stale"
   fi
 }
 
@@ -979,11 +1102,21 @@ update_list() {
 # list_global
 ############################################################
 list_global() {
-  #if ! [ -d "$DATADIR" -a -r "${TEMPDIR}/labels" -a "${TEMPDIR}/abstractrepos" ]; then
-  #  echo "rg: error there is no overview data. Try running 'rg' with no flags"
-  #  return
-  #fi
+  #
+  # After running rg, we've likely modified the list, so if we
+  # have not synched and reported the entire list, we'll
+  # purge the saves .latest and flag the data as stale
+  #
+  if [ -r "${DATADIR}/.stale" ]; then
+    echo "Data likely out of date. Try running a synch:   rg /"
+  fi
 
+  if [ -r "${DATADIR}/.latest" ]; then
+    cat "${DATADIR}/.latest"
+    return
+  fi
+
+  # otherwise, we'll build a new .latest and print it
   TEMPLINE=${TEMPDIR}/line
   #
   # cleanup the comparisons
@@ -1004,7 +1137,7 @@ list_global() {
     fi
 
     summarize_precomputed_repos "$repo"
-    echo "$RET"
+    echo "$RET" | tee -a "${DATADIR}/.latest"
 
   done < "${TEMPDIR}/abstractrepos"
 }
