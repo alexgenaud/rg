@@ -464,69 +464,47 @@ normalize_target() {
 # search_for_repos
 ############################################################
 search_for_repos() {
-  TAIL=/$TARGET_REPO
-  TAILGIT=/${TARGET_REPO}.git
   if [ "_$TARGET_REPO" = "_" ]; then
     TAIL=
     TAILGIT=
-  elif [ `echo $TAIL|grep " "|wc -l` = "1" ]; then
-    #
-    # The repo path has spaces, so we need to search
-    # more carefully, each device individually
-    #
-    if [ "_$WINROOT" != "__" ]; then
-      # Windows, start with User home first
-      find -P "/cygdrive/${WINROOT}/Users$TAIL" \
-           "/cygdrive/${WINROOT}/Users$TAILGIT" \
-            -type d -name "*.git" \
-            2> /dev/null \
-            | grep -v "^/cygdrive/./cyg[^/]*/home" \
-            | sed "s:/*.git$::" | sort \
-            1> "${TEMPDIR}/allrepos" \
-            2> /dev/null
-      # Windows, append all drives
-      for d in `ls -d /cygdrive/*|grep -v /cygdrive/$WINROOT`; do
-        find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
-            2> /dev/null \
-            | grep -v "^/cygdrive/./cyg[^/]*/home" \
-            | sed "s:/*.git$::" | sort \
-            1>> "${TEMPDIR}/allrepos" \
-            2> /dev/null
-      done
-    else # Linux
-      for d in `find -P /home /media/* /mnt/* -maxdepth 0 -type d` ; do
-        find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
-            2> /dev/null \
-            | sed "s:/*.git$::" | sort \
-            1>> "${TEMPDIR}/allrepos" \
-            2> /dev/null
-        done
-    fi
-    return
+  else
+    TAIL=/$TARGET_REPO
+    TAILGIT=/${TARGET_REPO}.git
   fi
 
   #
-  # otherwise, there are no spaces and we can find in one go
+  # The repo path might have spaces, so we
+  # need to search each device individually
   #
   if [ "_$WINROOT" != "__" ]; then
-    # Windows
-    DRIVES="/cygdrive/${WINROOT}/Users$TAIL /cygdrive/${WINROOT}/Users$TAILGIT"
+    # Windows, start with User home first
+    find -P "/cygdrive/${WINROOT}/Users$TAIL" \
+         "/cygdrive/${WINROOT}/Users$TAILGIT" \
+          -type d -name "*.git" \
+          2> /dev/null \
+          | grep -v "^/cygdrive/./cyg[^/]*/home" \
+          | sed "s:/*.git$::" \
+          1> "${TEMPDIR}/allrepos" \
+          2> /dev/null
+    # Windows, append all drives
     for d in `ls -d /cygdrive/*|grep -v /cygdrive/$WINROOT`; do
-      DRIVES="$DRIVES ${d}$TAIL ${d}$TAILGIT"
+      find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
+          2> /dev/null \
+          | grep -v "^/cygdrive/./cyg[^/]*/home" \
+          | sed "s:/*.git$::" \
+          1>> "${TEMPDIR}/allrepos" \
+          2> /dev/null
     done
   else # Linux
-    DRIVES="/home$TAIL /home$TAILGIT"
-    for d in `find -P /media/* /mnt/* -maxdepth 0 -type d`; do
-      DRIVES="$DRIVES ${d}$TAIL ${d}$TAILGIT"
+    find -P /home /media/* /mnt/* -maxdepth 0 -type d \
+      2> /dev/null | while read d ; do
+        find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
+          2> /dev/null \
+          | sed "s:/*.git$::" \
+          1>> "${TEMPDIR}/allrepos" \
+          2> /dev/null
     done
   fi
-
-  find -P $DRIVES -type d -name "*.git" \
-       2> /dev/null \
-       | grep -v "^/cygdrive/./cyg[^/]*/home" \
-       | sed "s:/*.git$::" | sort \
-       1> "${TEMPDIR}/allrepos" \
-       2> /dev/null
 }
 
 ############################################################
@@ -591,13 +569,13 @@ label_devices() {
         # and HOMEPATH Windows environment variables
         #
         LABEL="${HOSTNAME}"
-      elif [ -r ${device}/.label ]; then
+      elif [ -r "${device}/.label" ]; then
         #
         # On Windows, any other device, for example
         # /cygdrive/x will take the name from a .label
         # file at the device file system root, if it exists
         #
-        LABEL=`head -1 ${device}/.label|\
+        LABEL=`head -1 "${device}/.label"|\
              sed "s:^\([a-zA-Z0-9][a-zA-Z0-9]*\).*$:\1:"|\
              grep "^[a-zA-Z0-9][a-zA-Z0-9]*$"`
       fi
@@ -619,8 +597,8 @@ label_devices() {
       # On Linux, we name external devices found under
       # /media or /mnt by their .lable file
       #
-      if [ -r ${device}/.label ]; then
-        LABEL=`head -1 ${device}/.label|\
+      if [ -r "${device}/.label" ]; then
+        LABEL=`head -1 "${device}/.label"|\
              sed "s:^\([a-zA-Z0-9][a-zA-Z0-9]*\).*$:\1:"|\
              grep "^[a-zA-Z0-9][a-zA-Z0-9]*$"`
       fi
@@ -1040,7 +1018,7 @@ compare_repos() {
     #
     # save tempdata to global data
     #
-    for label in `ls "${TEMPLINEDATA}"`; do
+    ls "${TEMPLINEDATA}" | while read label ; do
       cat "${TEMPLINEDATA}/${label}" >> "${TEMPDATA}/${label}"
     done
 

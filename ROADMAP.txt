@@ -20,6 +20,9 @@ DONE /home on Cygwin
   should search target /cygdrive/c/Users
 
 
+DONE fixed devices with space /media/My Passport fails on Ubuntu
+
+
 Synch updates list, otherwise fast non-synch list
   rg / writes to data, plus data/.latest, rm data/.latest
   rg -l reads data/.latest, otherwise same as normal, no synch (deprecate dry run)
@@ -51,5 +54,3 @@ fast forward
 
 
 BUG not sure COLUMNs works on Ubuntu
-
-BUG devices with space /media/My Passport fails on Ubuntu
