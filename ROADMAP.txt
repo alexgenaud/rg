@@ -15,8 +15,13 @@ DONE Root target
   overwrite list only on root target
 
 
+DONE /home on Cygwin
+  searching from /home in cygwin fails,
+  should search target /cygdrive/c/Users
+
+
 Synch updates list, otherwise fast non-synch list
-  rg / writes to data, plus data/.latest, rm data/.latest 
+  rg / writes to data, plus data/.latest, rm data/.latest
   rg -l reads data/.latest, otherwise same as normal, no synch (deprecate dry run)
 
 
@@ -24,6 +29,11 @@ check for forks
   sometimes a fork is not intended,
   just a copy in the wrong directory structure
   check the first commit hash against the abstract paths
+
+
+check for uncovered
+  look for data, particularly in /home that is not
+  covered by git repository or explicitly gitignored
 
 
 fast forward
@@ -38,3 +48,8 @@ fast forward
 0000000:0000000:BACKUP:/cygdrive/c/Users/alex/.environment
 
 ==========================================================
+
+
+BUG not sure COLUMNs works on Ubuntu
+
+BUG devices with space /media/My Passport fails on Ubuntu

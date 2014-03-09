@@ -205,18 +205,18 @@ parse_target() {
     echo rg: Error in parse_target expects two arguments TARGET, OS
     exit 1
   fi
-  TARGET_ABSOLUTE=$1
+  PT_TARGET_ABSOLUTE=$1
   WINROOT=$2
 
   if [ "_$WINROOT" = "__" ]; then
     #
     # assume Linux machine
     #
-    TARGET_DEVICE=`echo $TARGET_ABSOLUTE |\
+    TARGET_DEVICE=`echo $PT_TARGET_ABSOLUTE |\
        grep    "^/\(home\|media/[^/]*\|mnt/[^/]*\)" |\
        grep -v "^/\(home\|m[a-t]*/[^/]*\)/\(Users\|home\)" |\
        sed   "s:^/\(home\|m[a-t]*/[^/]*\).*$:/\1:"`
-    TARGET_REPO=`echo $TARGET_ABSOLUTE |\
+    TARGET_REPO=`echo $PT_TARGET_ABSOLUTE |\
        grep    "^/\(home\|media/[^/]*\|mnt/[^/]*\)" |\
        grep -v "^/\(home\|m[a-t]*/[^/]*\)/\(Users\|home\)" |\
        sed -e "s:^/\(home\|m[a-t]*/[^/]*\)/*\(.*\)$:\2:"\
@@ -225,12 +225,19 @@ parse_target() {
     #
     # assume Windows machine running cygwin
     #
-    TARGET_DEVICE=`echo $TARGET_ABSOLUTE |\
+
+    #
+    # if Cygwin and /home/x then /cygdrive/y/Users/x
+    #
+    PT_TARGET_ABSOLUTE=`echo $PT_TARGET_ABSOLUTE |\
+       sed "s:^/home:/cygdrive/${WINROOT}/Users:"`
+
+    TARGET_DEVICE=`echo $PT_TARGET_ABSOLUTE |\
        grep    "^/cygdrive/[a-z]" |\
        grep    "^/cygdrive/\(${WINROOT}/Users\|[^${WINROOT}]\)" |\
        grep -v "^/cygdrive/[^${WINROOT}]/\(Users\|home\)" |\
        sed "s:^\(/cygdrive/\)\(${WINROOT}/Users\|[^${WINROOT}]\).*$:\1\2:"`
-    TARGET_REPO=`echo $TARGET_ABSOLUTE |\
+    TARGET_REPO=`echo $PT_TARGET_ABSOLUTE |\
        grep    "^/cygdrive/[a-z]" |\
        grep    "^/cygdrive/\(${WINROOT}/Users\|[^${WINROOT}]\)" |\
        grep -v "^/cygdrive/[^${WINROOT}]/\(Users\|home\)" |\
@@ -239,11 +246,11 @@ parse_target() {
   fi
 
   RET=ERROR
-  if [ "_$TARGET_ABSOLUTE" = "_/" -o "_$TARGET_ABSOLUTE" = "_" ]; then
+  if [ "_$PT_TARGET_ABSOLUTE" = "_/" -o "_$PT_TARGET_ABSOLUTE" = "_" ]; then
     RET=ERROR
-  elif [ "_$TARGET_REPO" = "_" -a "_$TARGET_ABSOLUTE" = "_$TARGET_DEVICE" ]; then
+  elif [ "_$TARGET_REPO" = "_" -a "_$PT_TARGET_ABSOLUTE" = "_$TARGET_DEVICE" ]; then
     RET=OK
-  elif [ "_$TARGET_ABSOLUTE" = "_${TARGET_DEVICE}/$TARGET_REPO" ]; then
+  elif [ "_$PT_TARGET_ABSOLUTE" = "_${TARGET_DEVICE}/$TARGET_REPO" ]; then
     RET=OK
   else
     RET=ERROR
@@ -334,6 +341,10 @@ parse_target_test() {
     "/cygdrive/c/Users" "c" "/cygdrive/c/Users" ""      "OK"
   parse_target_assert \
     "/cygdrive/x"       "c" "/cygdrive/x"       ""      "OK"
+  parse_target_assert \
+    "/home"             "c" "/cygdrive/c/Users" ""      "OK"
+  parse_target_assert \
+    "/home/bob"         "c" "/cygdrive/c/Users" "bob"   "OK"
 
   parse_target_assert \
     ""                  "c" ""                  ""      "ERROR"
@@ -341,8 +352,6 @@ parse_target_test() {
     "/"                 "c" ""                  ""      "ERROR"
   parse_target_assert \
     "/x"                "c" ""                  ""      "ERROR"
-  parse_target_assert \
-    "/home"             "c" ""                  ""      "ERROR"
   parse_target_assert \
     "/cygdrive"         "c" ""                  ""      "ERROR"
   parse_target_assert \
