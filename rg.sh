@@ -564,9 +564,10 @@ abstract_data() {
 #
 ############################################################
 label_devices() {
+  if [ "_${HOSTNAME}" = "_" ]; then HOSTNAME=$(hostname); fi
   while read device; do
     LABEL=
-    if [ "_$device" = "_/home" -a `echo _$HOSTNAME|wc -c` -ge 3 ]; then
+    if [ "_$device" = "_/home" ]; then
       #
       # On Linux, we name anything under /home
       # by the machine name (HOSTNAME)
@@ -1048,39 +1049,18 @@ update_list() {
   #
   # After running rg, we've likely modified the list, so if we
   # have not synched and reported the entire list, we'll
-  # purge the saves .latest and flag the data as stale
+  # purge the saved .latest
+  #
+  if [ -r "${DATADIR}/.latest" ]; then
+    mv "${DATADIR}/.latest" "${DATADIR}/.stale"
+  fi
+
+  #
+  # if partial synch, then we return without
+  # overwriting any of the full data samples
   #
   if [ "_$TARGET_REPO" != "_" ]; then
-    #
-    #  if partial synch
-    #
-    if [ -r "${DATADIR}/.latest" ]; then
-      touch "${DATADIR}/.stale"
-    fi
-    #
-    # do not update the .rg/data directory
-    # with partial junk.
-    #
-    return;
-  else
-    #
-    # if synched the full list
-    #
-    # it would be nice if we generated a full .latest
-    # while going through all repos. That's for another
-    # day. For now, we remove, and let the list_global
-    # function build it when using 'rg -l'
-    #
-    if [ -r "${DATADIR}/.latest" ]; then
-      rm "${DATADIR}/.latest"
-    fi
-    #
-    # the .latest is also no longer stale,
-    # indeed, it's freshly gone
-    #
-    if [ -r "${DATADIR}/.stale" ]; then
-      rm "${DATADIR}/.stale"
-    fi
+     return;
   fi
 
   #
@@ -1089,12 +1069,6 @@ update_list() {
   #
   if [ `ls "${TEMPDATA}"|wc -l` != "0" ]; then
     mv -f "${TEMPDATA}"/* "${DATADIR}"
-  fi
-  if [ -r "${DATADIR}/.latest" ]; then
-    rm "${DATADIR}/.latest"
-  fi
-  if [ -r "${DATADIR}/.stale" ]; then
-    rm "${DATADIR}/.stale"
   fi
 }
 
@@ -1105,12 +1079,8 @@ list_global() {
   #
   # After running rg, we've likely modified the list, so if we
   # have not synched and reported the entire list, we'll
-  # purge the saves .latest and flag the data as stale
+  # purge the saved .latest
   #
-  if [ -r "${DATADIR}/.stale" ]; then
-    echo "Data likely out of date. Try running a synch:   rg /"
-  fi
-
   if [ -r "${DATADIR}/.latest" ]; then
     cat "${DATADIR}/.latest"
     return
