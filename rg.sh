@@ -1052,8 +1052,10 @@ synchronize_similar_repos() {
       else
         mkdir -p "$PARENTPATH"
         git clone $BAREFLAG "$LATEST_FULLPATH" "${FULLPATH}${BARETAIL}" \
-          1>> "${TEMPDIR}/gitstdout" 2>> "${TEMPDIR}/gitstderr"
-        RET="SYNC"
+          1>> "${TEMPDIR}/gitstdout" 2> "${TEMPDIR}/gitstderr"
+        # git clone can fail if not enough memory or extant directory
+        if [ `grep fatal "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
+          RET="FAIL"; else RET="SYNC"; fi
       fi
     elif [ "_$TYPE" = "_WORK" ]; then
       #
@@ -1066,10 +1068,12 @@ synchronize_similar_repos() {
       if [ "_$DRYRUN" = "_YES" ]; then
         echo "    $FULLPATH" pull from "$LATEST_FULLPATH"
       else
-        git pull "$LATEST_FULLPATH" master \
-          1>> "${TEMPDIR}/gitstdout" 2>> "${TEMPDIR}/gitstderr"
+        git pull --ff-only "$LATEST_FULLPATH" master \
+          1>> "${TEMPDIR}/gitstdout" 2> "${TEMPDIR}/gitstderr"
       fi
-      RET="SYNC"
+      # git pull will fail if not fast-forward
+      if [ `grep "\(fatal\|rejected\).*fast-forward" "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
+        RET="FAIL"; else RET="SYNC"; fi
     elif [ "_$TYPE" = "_BARE" ]; then
       #
       # This repo already exists, but it is old
@@ -1082,9 +1086,11 @@ synchronize_similar_repos() {
         echo "    $LATEST_FULLPATH" push to "$FULLPATH"
       else
         git push "$FULLPATH" master \
-          1>> "${TEMPDIR}/gitstdout" 2>> "${TEMPDIR}/gitstderr"
+          1>> "${TEMPDIR}/gitstdout" 2> "${TEMPDIR}/gitstderr"
       fi
-      RET="SYNC"
+      # git pull will fail if not fast-forward
+      if [ `grep "\(fatal\|rejected\).*fast-forward" "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
+        RET="FAIL"; else RET="SYNC"; fi
     fi
   done < "${TEMPLINE}/sort"
   cd "${SYNC_ORIGDIR}"

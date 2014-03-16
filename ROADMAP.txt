@@ -5,52 +5,24 @@ ROADMAP : Future Features
 =========================
 
 
-DONE display based on screen width, default 80 width
-  only tested on one Debian machine
-  some issues with Cygwin, alias export COLUMNS work-around
-
-
-DONE Root target
-  default / target, not /home/USER
-  overwrite list only on root target
-
-
-DONE /home on Cygwin
-  searching from /home in cygwin fails,
-  should search target /cygdrive/c/Users
-
-
-DONE fixed devices with space /media/My Passport fails on Ubuntu
-
-
-Synch updates list, otherwise fast non-synch list
+Synch and global list at the same time
   rg / writes to data, plus data/.latest, rm data/.latest
   rg -l reads data/.latest, otherwise same as normal, no synch (deprecate dry run)
 
 
-check for forks
+check for forks, same repo in different location
   sometimes a fork is not intended,
   just a copy in the wrong directory structure
   check the first commit hash against the abstract paths
 
 
+check for parallel forks
+  currently we only know about forks when fast-forward
+  synchs fail. Should have some indication that two repos
+  may have the same number of commit log lines, but are
+  not the same.
+
+
 check for uncovered
   look for data, particularly in /home that is not
   covered by git repository or explicitly gitignored
-
-
-fast forward
-  Needs new internal data format
-    Abbrev_list:Repo:Summary
-    LogNum:Hash:StatusNum:Label:Repo
-
-
-===== ranksync sort ======================================
-
-0000050:0000000:BARE:/cygdrive/d/alex/.environment.git
-0000000:0000000:BACKUP:/cygdrive/c/Users/alex/.environment
-
-==========================================================
-
-
-BUG not sure COLUMNs works on Ubuntu
