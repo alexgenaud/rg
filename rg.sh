@@ -462,6 +462,12 @@ normalize_target() {
     done
   fi
 
+  #
+  # remove trailing .git. Bare and working repositories
+  # refer to the same abstract repo
+  #
+  TARGET_ABSOLUTE=`echo $TARGET_ABSOLUTE|sed "s:/*.git$::"`
+
   parse_target "$TARGET_ABSOLUTE" "$WINROOT"
   if [ "_$RET" = "_ERROR" ]; then
     echo rg: error parse_target bad target, should be at least
