@@ -54,6 +54,12 @@
 # rg -w TARGET  = work. Synchronize or clone all
 #              to TARGET as working repos
 #
+# ================
+# Catalogue
+# ================
+#
+# rg -c TARGET  = catalogue each entire working tree
+#
 ###################################################
 #
 # INSTALLATION
@@ -73,6 +79,7 @@ LIST=NO
 TEST=NO
 TARGET=NO
 BACKUP=NO
+CATALOGUE=NO
 
 ############################################################
 # get_arg
@@ -85,6 +92,7 @@ get_arg() {
     if [ `echo "$1"|grep t|wc -l` = "1" ]; then TEST=YES      ; fi
     if [ `echo "$1"|grep b|wc -l` = "1" ]; then _BACKBARE=YES ; fi
     if [ `echo "$1"|grep w|wc -l` = "1" ]; then _BACKWORK=YES ; fi
+    if [ `echo "$1"|grep c|wc -l` = "1" ]; then CATALOGUE=YES ; fi
   elif [ "$TARGET" = "NO" ]; then
     TARGET="$1"
     return
@@ -165,10 +173,13 @@ initialize() {
   # HOME=/home/u = /cygdrive/c/Users/u
   #
   DATADIR="${HOME}/.rg/data"
+  CATADIR="${HOME}/.rg/catalogue"
   TEMPDIR="${HOME}/.rg/tmp/$$"
   TEMPDATA="${TEMPDIR}/data"
   mkdir -p "${DATADIR}"
+  mkdir -p "${CATADIR}"
   mkdir -p "${TEMPDATA}"
+  ORIGINAL_DIR=$PWD
 
 
   #
@@ -420,7 +431,7 @@ normalize_target() {
     # if the TARGET is a single dot, then it represents
     # the current working directory
     #
-    TARGET_ABSOLUTE="$PWD"
+    TARGET_ABSOLUTE="$ORIGINAL_DIR"
   else
     #
     # otherwise, remove any trailing slashes or a single
@@ -434,7 +445,7 @@ normalize_target() {
     #
     if [ "0" = `echo $TARGET|grep "^/"|wc -l` ]; then
       # TARGET is relative
-      TARGET_ABSOLUTE="${PWD}/$TARGET"
+      TARGET_ABSOLUTE="${ORIGINAL_DIR}/$TARGET"
     else
       TARGET_ABSOLUTE="$TARGET"
     fi
@@ -649,7 +660,6 @@ summarize_one_repo() {
     return
   fi
 
-  ORIGDIR="$PWD"
   cd "${FULLPATH}"
 
   # number of git log entries
@@ -668,9 +678,53 @@ summarize_one_repo() {
   fi
 
   # return to original directory
-  cd "${ORIGDIR}"
+  cd "${ORIGINAL_DIR}"
 
   RET="${NUMLOG}:${NUMSTAT}"
+}
+
+############################################################
+#
+# catalogue_one_repo ( LOG_STATUS )
+#
+# input LOG_STATUS example:      0000013:0000007
+#
+# This method if called, writes a summary of all files
+# in a repo to ~/.rg/catalogue
+#
+# Cataloging does nothing to each repo
+# but it stores a SHA sum of every file
+# based on each working directory.
+# Very heavy operations. We check
+# that both the user wants it (=YES)
+# and a catalogue does not already exist
+# for this repo version.
+#
+#
+############################################################
+catalogue_one_repo() {
+  # catalogue_one_repo "$FULLPATH" "$repo" "$RET"
+  CAT_FULLPATH=$1
+  CAT_REPO=$2
+  CAT_LOG_STATUS=$3
+
+  CAT_PATH=${CATADIR}/${CAT_REPO}
+  CAT_TARGET=${CAT_PATH}/${CAT_LOG_STATUS}
+
+  # make the .rg/catalogue/path if it does not exist
+  [ -d "$CAT_PATH" ] || mkdir -p "$CAT_PATH"
+
+  # return if this exact repo has already been catalogued
+  [ -r "$CAT_TARGET" ] && return
+
+  #
+  # traverse and digest the repo working tree
+  #
+  # TODO: must find a better way to filter out the .git directory
+  #
+  cd "${FULLPATH}"
+  find * -type f -exec sha1sum {} \; | grep -v ".git" > "${CAT_TARGET}"
+  cd "${ORIGINAL_DIR}"
 }
 
 ############################################################
@@ -722,6 +776,21 @@ summarize_similar_repos() {
     summarize_one_repo "$FULLPATH" "$TYPE"
 
     #
+    # Cataloging does nothing to the repos
+    # but it stores a SHA sum of every file
+    # based on each working directory.
+    # Very heavy operations. We check
+    # that both the user wants it (=YES)
+    # and the repo is a working copy and,
+    # in the method, check that a
+    # catalogue does not already exist
+    # for this repo version.
+    #
+    if [ "_$CATALOGUE" = "_YES" -a "_$TYPE" = "_WORK" ]; then
+      catalogue_one_repo "$FULLPATH" "$repo" "$RET"
+    fi
+
+    #
     # add the label and abstract repo to its own file in
     # storage, like so:
     #    0000013:0000007:alice:foo/bar
@@ -747,13 +816,30 @@ summarize_similar_repos() {
     #
     RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${NUMSTAT}"
     if [ -r "$RANKFILE" ]; then
+      #Example:      9:13!a,b
       echo `head -1 "$RANKFILE"`,$ABBREV > "$RANKFILE"
     else
+      # CAT_DIVIDER   9:0:a   or   9:0!a
+      #
+      # ":" indicates that the catalogue does exist for
+      # this repo version. Example   9:0:a
+      #
+      # "!" indicates that the catalogue does not exist for
+      # this repo version (which could easily be the case if
+      # this method was never called). Example  9:0!a
+      if [ -r "${CATADIR}/${repo}/${NUMLOG}:${NUMSTAT}" ]; then
+        CAT_DIVIDER=":"
+      else CAT_DIVIDER="!" ;  fi
+
+      # reduce NUMLOG and NUMSTAT from for example
+      # 0000009:0000013 to 9:13
       NUMLOG=`echo $NUMLOG|sed "s:^0*::"`
       if [ "_$NUMLOG" = "_" ]; then NUMLOG=0; fi
       NUMSTAT=`echo $NUMSTAT|sed "s:^0*::"`
       if [ "_$NUMSTAT" = "_" ]; then NUMSTAT=0; fi
-      echo "${NUMLOG}:${NUMSTAT}:${ABBREV}" > "$RANKFILE"
+
+      #Example:      9:13!a
+      echo "${NUMLOG}:${NUMSTAT}${CAT_DIVIDER}${ABBREV}" > "$RANKFILE"
     fi
 
   done < "${TEMPDIR}/labels"
@@ -761,17 +847,32 @@ summarize_similar_repos() {
   FIRST=YES
   RET="${ABBREV_LINE}"
 
+  # Show the device abbreviations such as (abc)
+  # unless synchronizing (===) or failure (!!!)
   if   [ "_$SHOWSYNC" = "_SYNC" ]; then
     RET=`echo "$RET"|sed "s:.:=:g"`
   elif [ "_$SHOWSYNC" = "_FAIL" ]; then
     RET=`echo "$RET"|sed "s:.:!:g"`
   fi
+
+  # Add the rest of the line. If the first rank, then
+  #
+  # RET=ABBREV REPO/PATH 9:0:a,b
+  #
+  # Subsequent ranks are tacked on such as
+  # "> 9:0:c" giving us something like
+  #
+  # RET=ABBREV REPO/PATH 9:0:a,b > 8:3:d > 7:5:c
+  #
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
+      # Example:     ABBREV REPO/PATH 9:0:a,b
       RET=$(printf "${RET} %-${WIDTH_REPO}s $FILE" "$repo")
       FIRST=NO
     else
+      # Example:     ABBREV REPO/PATH 9:0:a,b > 8:3:d
+      # Example:     ABBREV REPO/PATH 9:0:a,b > 8:3:d > 7:5:c
       RET="${RET} > ${FILE}"
     fi
   done
@@ -806,27 +907,61 @@ summarize_precomputed_repos() {
     NUMLOG=`echo $LINE|cut -d: -f1`
     NUMSTAT=`echo $LINE|cut -d: -f2`
 
+    #
+    # Here we group lines with the same log status
+    # such that 12:0:a and 12:0:b becomes 12:0:a,b
+    #
     RANKFILE="${TEMPLINE}/rankabbrev${NUMLOG}_${NUMSTAT}"
     if [ -r "$RANKFILE" ]; then
+      #Example:      9:13!a,b
       echo `head -1 "$RANKFILE"`,$ABBREV > "$RANKFILE"
     else
+      # CAT_DIVIDER   9:0:a   or   9:0!a
+      #
+      # ":" indicates that the catalogue does exist for
+      # this repo version. Example   9:0:a
+      #
+      # "!" indicates that the catalogue does not exist for
+      # this repo version (which could easily be the case if
+      # this method was never called). Example  9:0!a
+      if [ -r "${CATADIR}/${repo}/${NUMLOG}:${NUMSTAT}" ]; then
+        CAT_DIVIDER=":"
+      else CAT_DIVIDER="!" ;  fi
+
+      # reduce NUMLOG and NUMSTAT from for example
+      # 0000009:0000013 to 9:13
       NUMLOG=`echo $NUMLOG|sed "s:^0*::"`
       if [ "_$NUMLOG" = "_" ]; then NUMLOG=0; fi
       NUMSTAT=`echo $NUMSTAT|sed "s:^0*::"`
       if [ "_$NUMSTAT" = "_" ]; then NUMSTAT=0; fi
-      echo "${NUMLOG}:${NUMSTAT}:${ABBREV}" > "$RANKFILE"
+
+      #Example:      9:13!a
+      echo "${NUMLOG}:${NUMSTAT}${CAT_DIVIDER}${ABBREV}" > "$RANKFILE"
     fi
 
   done < "${TEMPDIR}/labels"
 
   FIRST=YES
   RET="${ABBREV_LINE}"
+
+  # Add the rest of the line. If the first rank, then
+  #
+  # RET=ABBREV REPO/PATH 9:0:a,b
+  #
+  # Subsequent ranks are tacked on such as
+  # "> 9:0:c" giving us something like
+  #
+  # RET=ABBREV REPO/PATH 9:0:a,b > 8:3:d > 7:5:c
+  #
   for file in `ls "${TEMPLINE}"/rankabbrev*|sort -r`; do
     FILE=`cat "$file"`
     if [ "$FIRST" = "YES" ]; then
+      # Example:     ABBREV REPO/PATH 9:0:a,b
       RET=$(printf "${RET} %-${WIDTH_REPO}s $FILE" "$repo")
       FIRST=NO
     else
+      # Example:     ABBREV REPO/PATH 9:0:a,b > 8:3:d
+      # Example:     ABBREV REPO/PATH 9:0:a,b > 8:3:d > 7:5:c
       RET="${RET} > ${FILE}"
     fi
   done
@@ -1014,6 +1149,7 @@ compare_repos() {
       summarize_similar_repos "$repo" "$RET"
       echo "$RET"
     fi
+
 
     #
     # save tempdata to global data
