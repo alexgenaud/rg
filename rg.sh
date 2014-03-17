@@ -172,11 +172,11 @@ initialize() {
   # further below we will normalize, for example
   # HOME=/home/u = /cygdrive/c/Users/u
   #
-  DATADIR="${HOME}/.rg/data"
-  CATADIR="${HOME}/.rg/catalogue"
+  LISTDIR="${HOME}/.rg/data/list"
+  CATADIR="${HOME}/.rg/data/catalogue"
   TEMPDIR="${HOME}/.rg/tmp/$$"
   TEMPDATA="${TEMPDIR}/data"
-  mkdir -p "${DATADIR}"
+  mkdir -p "${LISTDIR}"
   mkdir -p "${CATADIR}"
   mkdir -p "${TEMPDATA}"
   ORIGINAL_DIR=$PWD
@@ -904,7 +904,7 @@ summarize_precomputed_repos() {
     ABBREV=`echo $LABEL|sed "s:^\(.\).*:\1:"`
 
     #0000004:0000000:ARCH_201311:foobar
-    LINE=`grep ":${repo}$" "${DATADIR}/$LABEL"`
+    LINE=`grep ":${repo}$" "${LISTDIR}/$LABEL"`
 
     if [ "_`echo $LINE|wc -c`" != "_1" ]; then
       ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
@@ -1190,8 +1190,8 @@ update_list() {
   # have not synched and reported the entire list, we'll
   # purge the saved .latest
   #
-  if [ -r "${DATADIR}/.latest" ]; then
-    mv "${DATADIR}/.latest" "${DATADIR}/.stale"
+  if [ -r "${LISTDIR}/.latest" ]; then
+    rm "${LISTDIR}/.latest"
   fi
 
   #
@@ -1207,7 +1207,7 @@ update_list() {
   # that have been recently updated, if there are any at all
   #
   if [ `ls "${TEMPDATA}"|wc -l` != "0" ]; then
-    mv -f "${TEMPDATA}"/* "${DATADIR}"
+    mv -f "${TEMPDATA}"/* "${LISTDIR}"
   fi
 }
 
@@ -1220,8 +1220,8 @@ list_global() {
   # have not synched and reported the entire list, we'll
   # purge the saved .latest
   #
-  if [ -r "${DATADIR}/.latest" ]; then
-    cat "${DATADIR}/.latest"
+  if [ -r "${LISTDIR}/.latest" ]; then
+    cat "${LISTDIR}/.latest"
     return
   fi
 
@@ -1233,10 +1233,10 @@ list_global() {
   rm -rf "${TEMPDIR}"/*
 
   # 0000013:0000007:alice:foo/bar
-  cut -d: -f3 "${DATADIR}"/* | sort | uniq > \
+  cut -d: -f3 "${LISTDIR}"/* | sort | uniq > \
       "${TEMPDIR}/labels"
 
-  cut -d: -f4 "${DATADIR}"/* | sort | uniq > \
+  cut -d: -f4 "${LISTDIR}"/* | sort | uniq > \
       "${TEMPDIR}/abstractrepos"
 
   while read repo; do
@@ -1246,7 +1246,7 @@ list_global() {
     fi
 
     summarize_precomputed_repos "$repo"
-    echo "$RET" | tee -a "${DATADIR}/.latest"
+    echo "$RET" | tee -a "${LISTDIR}/.latest"
 
   done < "${TEMPDIR}/abstractrepos"
 }
