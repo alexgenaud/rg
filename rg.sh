@@ -493,6 +493,7 @@ search_for_repos() {
   # The repo path might have spaces, so we
   # need to search each device individually
   #
+  X=1
   if [ "_$WINROOT" != "__" ]; then
     # Windows, start with User home first
     find -P "/cygdrive/${WINROOT}/Users$TAIL" \
@@ -501,27 +502,34 @@ search_for_repos() {
           2> /dev/null \
           | grep -v "^/cygdrive/./cyg[^/]*/home" \
           | sed "s:/*.git$::" \
-          1> "${TEMPDIR}/allrepos" \
-          2> /dev/null
+          1> "${TEMPDIR}/"somerepos0 \
+          2> /dev/null &
     # Windows, append all drives
     for d in `ls -d /cygdrive/*|grep -v /cygdrive/$WINROOT`; do
       find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
           2> /dev/null \
           | grep -v "^/cygdrive/./cyg[^/]*/home" \
           | sed "s:/*.git$::" \
-          1>> "${TEMPDIR}/allrepos" \
-          2> /dev/null
+          1>> "${TEMPDIR}/"somerepos$X \
+          2> /dev/null &
+      X=$(( $X + 1 ))
     done
   else # Linux
     find -P /home /media/* /mnt/* -maxdepth 0 -type d \
-      2> /dev/null | while read d ; do
-        find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
+      2> /dev/null > "${TEMPDIR}/devicelist"
+    while read d ; do
+      find -P "${d}$TAIL" "${d}$TAILGIT" -type d -name "*.git" \
           2> /dev/null \
           | sed "s:/*.git$::" \
-          1>> "${TEMPDIR}/allrepos" \
-          2> /dev/null
-    done
+          1>> "${TEMPDIR}/"somerepos$X \
+          2> /dev/null &
+      X=$(( $X + 1 ))
+    done < "${TEMPDIR}/devicelist"
   fi
+  wait # each device search is in parallel
+  cat "${TEMPDIR}/"somerepos* |\
+    grep "^/\(home\|cygdrive/[a-z]\|media/[^/]*\|mnt/[^/]*\)/.*" >\
+    "${TEMPDIR}/allrepos"
 }
 
 ############################################################
@@ -531,10 +539,8 @@ abstract_data() {
   #
   # grab all unique devices which have git repositories
   #
-  grep "^/\(home\|cygdrive/[a-z]\|media/[^/]*\|mnt/[^/]*\)/.*"\
-       "${TEMPDIR}/allrepos" |\
-       sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:/\1:" |\
-       sort | uniq 1> "${TEMPDIR}/devices"
+  sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:/\1:"\
+      "${TEMPDIR}/allrepos" | sort | uniq 1> "${TEMPDIR}/devices"
 
   #
   # find the union of all abstract repositories
@@ -545,10 +551,8 @@ abstract_data() {
   #      /cygdrive/x/project
   # the abstract repo would be 'project'
   #
-  grep "^/\(home\|cygdrive/[a-z]\|media/[^/]*\|mnt/[^/]*\)/.*"\
-       "${TEMPDIR}/allrepos" |\
-       sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:\2:" |\
-       sort | uniq 1> "${TEMPDIR}/abstractrepos"
+  sed "s:^/\(home\|c[^/]*/./Users\|[cm][a-z]*/[^/]*\)/\(.*\)$:\2:"\
+      "${TEMPDIR}/allrepos" | sort | uniq 1> "${TEMPDIR}/abstractrepos"
 
   if [ "_$BACKUP" != "_NO" ]; then
     echo $TARGET_DEVICE >> "${TEMPDIR}/devices"
