@@ -86,22 +86,23 @@ CATALOGUE=NO
 ############################################################
 get_arg() {
   if [ `echo "${1}_"|sed "s:^\(.\).*:\1:g"` = "-" ]; then
-    if [ `echo "$1"|grep d|wc -l` = "1" ]; then DRYRUN=YES    ; fi
-    if [ `echo "$1"|grep l|wc -l` = "1" ]; then LIST=YES      ; fi
-    if [ `echo "$1"|grep q|wc -l` = "1" ]; then QUIET=YES     ; fi
-    if [ `echo "$1"|grep t|wc -l` = "1" ]; then TEST=YES      ; fi
-    if [ `echo "$1"|grep b|wc -l` = "1" ]; then _BACKBARE=YES ; fi
-    if [ `echo "$1"|grep w|wc -l` = "1" ]; then _BACKWORK=YES ; fi
-    if [ `echo "$1"|grep c|wc -l` = "1" ]; then CATALOGUE=YES ; fi
+    [ -n "`echo $1|grep d`" ] && DRYRUN=YES
+    [ -n "`echo $1|grep l`" ] && LIST=YES
+    [ -n "`echo $1|grep q`" ] && QUIET=YES
+    [ -n "`echo $1|grep t`" ] && TEST=YES
+    [ -n "`echo $1|grep b`" ] && _BACKBARE=YES
+    [ -n "`echo $1|grep w`" ] && _BACKWORK=YES
+    [ -n "`echo $1|grep c`" ] && CATALOGUE=YES
   elif [ "$TARGET" = "NO" ]; then
     TARGET="$1"
     return
   fi
-  if   [ "_$_BACKBARE" = "_YES" ]; then BACKUP=BARE
-  elif [ "_$_BACKWORK" = "_YES" ]; then BACKUP=WORK ; fi
+    if [ "_$_BACKBARE" = "_YES" ]; then BACKUP=BARE
+  elif [ "_$_BACKWORK" = "_YES" ]; then BACKUP=WORK
+    fi
 }
-if   [ $# -ge 1 ]; then get_arg "$1" ; fi
-if [ $# -ge 2 -a "_$TARGET" = "_NO" ]; then TARGET="$2" ; fi
+[ $# -ge 1 ] && get_arg "$1"
+[ $# -ge 2 -a "_$TARGET" = "_NO" ] && TARGET="$2"
 
 #
 # Backup flag requires a unique TARGET
@@ -112,18 +113,18 @@ if [ "_$BACKUP" != "_NO" ]; then
     echo "    Cloning all repositories into curent directory"
     echo "    requires an explicit dot ('.') such as:"
     echo
-    if [ "_$BACKUP" = "_BARE" ]; then
-         echo "     rg -b ."
-    else echo "     rg -w ."   ; fi
+    [ "_$BACKUP" = "_BARE" ]\
+      && echo "     rg -b ."\
+      || echo "     rg -w ."
     echo
     exit 1
   elif [ "_$TARGET" = "_/" ]; then
     echo rg: error: $BACKUP clone requires a unique target in
     echo "    which to clone all repositories into, such as:"
     echo
-    if [ "_$BACKUP" = "_BARE" ]; then
-         echo "     rg -b /home"
-    else echo "     rg -w /home" ; fi
+    [ "_$BACKUP" = "_BARE" ]\
+      && echo "     rg -b /home"\
+      || echo "     rg -w /home"
     echo
     exit 1
   fi
@@ -148,21 +149,29 @@ initialize() {
   # point to something like /cygdrive/c/Users/me
   #
   WINROOT='_'
-  if [ "_${HOMEDRIVE}" != "_" ]; then # Windows
+  if [ -n "$HOMEDRIVE" ]; then # Windows
     WINROOT=`echo "${HOMEDRIVE}_"|cut -c 1|\
       tr '[:upper:]' '[:lower:]'`
     HOME=/cygdrive/${WINROOT}/Users/$USERNAME
-    if [ "_$COLUMNS" = "_" ]; then
-      #
-      # reading COLUMNS from an interactive
-      # shell is totally unreliable
-      #
-      #COLUMNS=$(bash -i ${HOME}/.rg/src/cygwin.columns.bash)
+  fi
+
+  #
+  # if the COLUMNS variable is not exposed, we
+  # attempt to get it from the 'resize' function,
+  # which may be part of the 'xterm' package
+  #
+  # Otherwise, suggest that the user export COLUMNS
+  # such as
+  #
+  # alias rg="export COLUMNS;dash ~/.rg/src/rg.sh"
+  #
+  if [ -z "$COLUMNS" ]; then
+    if [ -n "$( resize 2> /dev/null )" ]; then
+      eval $( resize )
+    else
       echo rg: Terminal width unknown. Suggest export COLUMNS
       echo rg: alias rg='export COLUMNS;dash ~/.rg/src/rg.sh'
     fi
-  elif [ "_$COLUMNS" = "_" ]; then # Linux
-    eval $( resize )
   fi
 
   #
@@ -176,9 +185,7 @@ initialize() {
   CATADIR="${HOME}/.rg/data/catalogue"
   TEMPDIR="${HOME}/.rg/tmp/$$"
   TEMPDATA="${TEMPDIR}/data"
-  mkdir -p "${LISTDIR}"
-  mkdir -p "${CATADIR}"
-  mkdir -p "${TEMPDATA}"
+  mkdir -p "${LISTDIR}" "${CATADIR}" "${TEMPDATA}"
   ORIGINAL_DIR=$PWD
 
 
@@ -186,12 +193,16 @@ initialize() {
   # fit repo nicely in terminal window
   # Repo path shall be between 20 and 90 char wide
   #
-  if [ "_$COLUMNS" =  "_" ]; then WIDTH_REPO=$DEFAULT_REPO_WIDTH
-  elif [ $COLUMNS -le  60 ]; then WIDTH_REPO=20
-  elif [ $COLUMNS -le 100 ]; then WIDTH_REPO=$(( $COLUMNS - 40 ))
-  elif [ $COLUMNS -gt 100 ]; then WIDTH_REPO=75
+    if [ -z "$COLUMNS" ]; then
+       WIDTH_REPO=$DEFAULT_REPO_WIDTH
+  elif [ $COLUMNS -le  34 ]; then
+       WIDTH_REPO=20
+  elif [ $COLUMNS -le 102 ]; then
+       WIDTH_REPO=$(( 10 * $COLUMNS / 17 ))
+  elif [ $COLUMNS -gt 102 ]; then
+       WIDTH_REPO=60
   else WIDTH_REPO=$DEFAULT_REPO_WIDTH
-  fi
+    fi
 }
 
 ############################################################
@@ -256,12 +267,14 @@ parse_target() {
            -e "s:/*$::"`
   fi
 
-  RET=ERROR
-  if [ "_$PT_TARGET_ABSOLUTE" = "_/" -o "_$PT_TARGET_ABSOLUTE" = "_" ]; then
+    if [ "_$PT_TARGET_ABSOLUTE" = "_/" -o\
+         -z "$PT_TARGET_ABSOLUTE" ]; then
     RET=ERROR
-  elif [ "_$TARGET_REPO" = "_" -a "_$PT_TARGET_ABSOLUTE" = "_$TARGET_DEVICE" ]; then
+  elif [ -z "$TARGET_REPO" -a\
+         "_$PT_TARGET_ABSOLUTE" = "_$TARGET_DEVICE" ]; then
     RET=OK
-  elif [ "_$PT_TARGET_ABSOLUTE" = "_${TARGET_DEVICE}/$TARGET_REPO" ]; then
+  elif [ "_$PT_TARGET_ABSOLUTE" =\
+         "_${TARGET_DEVICE}/$TARGET_REPO" ]; then
     RET=OK
   else
     RET=ERROR
@@ -419,7 +432,7 @@ normalize_target() {
   # if TARGET is not set, then assume the root directory
   # in other words, synchronize and list everything
   #
-  if [ "_$TARGET" = "_"  -o "_$TARGET" = "_NO" -o \
+  if [ -z "$TARGET" -o "_$TARGET" = "_NO" -o \
        "_$TARGET" = "_/" -o "_$TARGET" = "_/." ]; then
     TARGET_DEVICE=$( echo $HOME|sed "s:/[^/]*$::" )
     TARGET_REPO=
@@ -443,22 +456,20 @@ normalize_target() {
     # find absolute path from relative path, for example
     # relative path foo/bar might be absolute /home/foo/bar
     #
-    if [ "0" = `echo $TARGET|grep "^/"|wc -l` ]; then
       # TARGET is relative
-      TARGET_ABSOLUTE="${ORIGINAL_DIR}/$TARGET"
-    else
-      TARGET_ABSOLUTE="$TARGET"
-    fi
+    [ `echo $TARGET|grep "^/"|wc -l` = "0" ]\
+      && TARGET_ABSOLUTE="${ORIGINAL_DIR}/$TARGET"\
+      || TARGET_ABSOLUTE="$TARGET"\
 
     #
     # remove back paths (..), for example
     # convert /home/../var to absolute /var
     #
     _NUM_TRIES=20
-    while [ `echo $TARGET_ABSOLUTE|grep "\.\."|wc -l` = "1" ]; do
+    while [ -n "`echo $TARGET_ABSOLUTE|grep '..'`" ]; do
       TARGET_ABSOLUTE=`echo $TARGET_ABSOLUTE|sed "s:/[^/]*/\.\.::"`
       _NUM_TRIES=$(( $_NUM_TRIES - 1 ))
-      if [ "$_NUM_TRIES" = "0" ]; then break ; fi
+      [ "$_NUM_TRIES" = "0" ] && break
     done
   fi
 
@@ -481,7 +492,7 @@ normalize_target() {
 # search_for_repos
 ############################################################
 search_for_repos() {
-  if [ "_$TARGET_REPO" = "_" ]; then
+  if [ -z "$TARGET_REPO" ]; then
     TAIL=
     TAILGIT=
   else
@@ -572,7 +583,7 @@ abstract_data() {
 #
 ############################################################
 label_devices() {
-  if [ "_${HOSTNAME}" = "_" ]; then HOSTNAME=$(hostname); fi
+  [ -z "$HOSTNAME" ] && HOSTNAME=$(hostname)
   while read device; do
     LABEL=
     if [ "_$device" = "_/home" ]; then
@@ -581,8 +592,8 @@ label_devices() {
       # by the machine name (HOSTNAME)
       #
       echo "${HOSTNAME}:${device}" >> "${TEMPDIR}/labels"
-    elif [ _`echo $device|grep "^/cygdrive/\([a-z]\|[a-z]/Users\)$"|wc -l` = "_1" ]; then
-      if [ `echo $device|grep "^/cygdrive/$WINROOT"|wc -l` != "0" ]; then
+    elif [ -n "`echo $device|grep '^/cygdrive/\([a-z]\|[a-z]/Users\)$'`" ]; then
+      if [ -n "`echo $device|grep ^/cygdrive/$WINROOT`" ]; then
         #
         # On Windows, we name anything under /cygdrive/c/Users
         # by the machine name (HOSTNAME). Note that 'c' is only
@@ -600,7 +611,7 @@ label_devices() {
              sed "s:^\([a-zA-Z0-9][a-zA-Z0-9]*\).*$:\1:"|\
              grep "^[a-zA-Z0-9][a-zA-Z0-9]*$"`
       fi
-      if [ "_$LABEL" = "_" ]; then
+      if [ -z "$LABEL" ]; then
         #
         # On Windows, if we can't determine the label any
         # other way, then we'll accept the drive letter.
@@ -611,9 +622,8 @@ label_devices() {
              tr '[:lower:]' '[:upper:]'`
       fi
       echo "${LABEL}:${device}" >> "${TEMPDIR}/labels"
-    elif [ "_`echo $device |\
-           grep "^/\(media\|mnt\)/[^/][^/]*$"|\
-           wc -l`" = "_1" ]; then
+    elif [ -n "`echo $device |\
+           grep '^/\(media\|mnt\)/[^/][^/]*$'`" ]; then
       #
       # On Linux, we name external devices found under
       # /media or /mnt by their .lable file
@@ -630,9 +640,8 @@ label_devices() {
       # many bare bones OS (Debian) just assign /media/usb0
       # if it mounts the device at all.
       #
-      if [ "_$LABEL" = "_" ]; then
+      [ -z "$LABEL" ] &&\
         LABEL=`echo $device|sed "s:^/[^/]*/\([^/]*\)$:\1:"`
-      fi
       echo "${LABEL}:${device}" >> "${TEMPDIR}/labels"
     fi
   done < "${TEMPDIR}/devices"
@@ -796,9 +805,8 @@ summarize_similar_repos() {
     # catalogue does not already exist
     # for this repo version.
     #
-    if [ "_$CATALOGUE" = "_YES" -a "_$TYPE" = "_WORK" ]; then
+    [ "_$CATALOGUE" = "_YES" -a "_$TYPE" = "_WORK" ] &&\
       catalogue_one_repo "$FULLPATH" "$repo" "$RET"
-    fi
 
     #
     # add the label and abstract repo to its own file in
@@ -837,16 +845,16 @@ summarize_similar_repos() {
       # "!" indicates that the catalogue does not exist for
       # this repo version (which could easily be the case if
       # this method was never called). Example  9:0!a
-      if [ -r "${CATADIR}/${repo}/${NUMLOG}:${NUMSTAT}" ]; then
-        CAT_DIVIDER=":"
-      else CAT_DIVIDER="!" ;  fi
+      [ -r "${CATADIR}/${repo}/${NUMLOG}:${NUMSTAT}" ]\
+        && CAT_DIVIDER=":" \
+        || CAT_DIVIDER="!"
 
       # reduce NUMLOG and NUMSTAT from for example
       # 0000009:0000013 to 9:13
       NUMLOG=`echo $NUMLOG|sed "s:^0*::"`
-      if [ "_$NUMLOG" = "_" ]; then NUMLOG=0; fi
+      [ -z "$NUMLOG" ] && NUMLOG=0
       NUMSTAT=`echo $NUMSTAT|sed "s:^0*::"`
-      if [ "_$NUMSTAT" = "_" ]; then NUMSTAT=0; fi
+      [ -z "$NUMSTAT" ] && NUMSTAT=0
 
       #Example:      9:13!a
       echo "${NUMLOG}:${NUMSTAT}${CAT_DIVIDER}${ABBREV}" > "$RANKFILE"
@@ -859,11 +867,11 @@ summarize_similar_repos() {
 
   # Show the device abbreviations such as (abc)
   # unless synchronizing (===) or failure (!!!)
-  if   [ "_$SHOWSYNC" = "_SYNC" ]; then
-    RET=`echo "$RET"|sed "s:.:=:g"`
+    if [ "_$SHOWSYNC" = "_SYNC" ]; then
+       RET=`echo "$RET"|sed "s:.:=:g"`
   elif [ "_$SHOWSYNC" = "_FAIL" ]; then
-    RET=`echo "$RET"|sed "s:.:!:g"`
-  fi
+       RET=`echo "$RET"|sed "s:.:!:g"`
+    fi
 
   # Add the rest of the line. If the first rank, then
   #
@@ -906,12 +914,12 @@ summarize_precomputed_repos() {
     #0000004:0000000:ARCH_201311:foobar
     LINE=`grep ":${repo}$" "${LISTDIR}/$LABEL"`
 
-    if [ "_`echo $LINE|wc -c`" != "_1" ]; then
-      ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
-    else
+    if [ -z "$LINE" ]; then
       # add a blank space to the abbreviation line
       ABBREV_LINE="${ABBREV_LINE} "
       continue
+    else
+      ABBREV_LINE="${ABBREV_LINE}${ABBREV}"
     fi
 
     NUMLOG=`echo $LINE|cut -d: -f1`
@@ -934,16 +942,16 @@ summarize_precomputed_repos() {
       # "!" indicates that the catalogue does not exist for
       # this repo version (which could easily be the case if
       # this method was never called). Example  9:0!a
-      if [ -r "${CATADIR}/${repo}/${NUMLOG}:${NUMSTAT}" ]; then
-        CAT_DIVIDER=":"
-      else CAT_DIVIDER="!" ;  fi
+      [ -r "${CATADIR}/${repo}/${NUMLOG}:${NUMSTAT}" ]\
+        && CAT_DIVIDER=":" \
+        || CAT_DIVIDER="!"
 
       # reduce NUMLOG and NUMSTAT from for example
       # 0000009:0000013 to 9:13
       NUMLOG=`echo $NUMLOG|sed "s:^0*::"`
-      if [ "_$NUMLOG" = "_" ]; then NUMLOG=0; fi
+      [ -z "$NUMLOG" ] && NUMLOG=0
       NUMSTAT=`echo $NUMSTAT|sed "s:^0*::"`
-      if [ "_$NUMSTAT" = "_" ]; then NUMSTAT=0; fi
+      [ -z "$NUMSTAT" ] && NUMSTAT=0
 
       #Example:      9:13!a
       echo "${NUMLOG}:${NUMSTAT}${CAT_DIVIDER}${ABBREV}" > "$RANKFILE"
@@ -1001,10 +1009,10 @@ synchronize_similar_repos() {
     # earlier compare function)
     #
     LOGNUM=`echo $RANK|cut -d: -f1|sed "s:^0*::"`
-    if [ "_$LOGNUM" = "_" ]; then LOGNUM=0; fi
+    [ -z "$LOGNUM" ] && LOGNUM=0
 
     STATNUM=`echo $RANK|cut -d: -f2|sed "s:^0*::"`
-    if [ "_$STATNUM" = "_" ]; then STATNUM=0; fi
+    [ -z "$STATNUM" ] && STATNUM=0
 
     TYPE=`echo $RANK|cut -d: -f3`
     FULLPATH=`echo $RANK|cut -d: -f4`
@@ -1050,7 +1058,8 @@ synchronize_similar_repos() {
       # exists. Then we can clone baz into bar.
       #
       PARENTPATH=`echo $FULLPATH|sed "s:/[^/]*$::"`
-      echo ${FULLPATH}${BARETAIL} clone of $LATEST_FULLPATH >> "${TEMPDIR}/gitstdout"
+      echo ${FULLPATH}${BARETAIL} clone of $LATEST_FULLPATH\
+        >> "${TEMPDIR}/gitstdout"
       if [ "_$DRYRUN" = "_YES" ]; then
         echo "    ${FULLPATH}${BARETAIL} clone of $LATEST_FULLPATH"
       elif [ -d "${FULLPATH}" -o -d "${FULLPATH}${BARETAIL}" ]; then
@@ -1064,8 +1073,9 @@ synchronize_similar_repos() {
         git clone $BAREFLAG "$LATEST_FULLPATH" "${FULLPATH}${BARETAIL}" \
           1>> "${TEMPDIR}/gitstdout" 2> "${TEMPDIR}/gitstderr"
         # git clone can fail if not enough memory or extant directory
-        if [ `grep fatal "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
-          RET="FAIL"; else RET="SYNC"; fi
+        [ `grep fatal "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]\
+          && RET="FAIL"\
+          || RET="SYNC"
       fi
     elif [ "_$TYPE" = "_WORK" ]; then
       #
@@ -1082,7 +1092,8 @@ synchronize_similar_repos() {
           1>> "${TEMPDIR}/gitstdout" 2> "${TEMPDIR}/gitstderr"
       fi
       # git pull will fail if not fast-forward
-      if [ `grep "\(fatal\|rejected\).*fast-forward" "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
+      if [ `grep '\(fatal\|rejected\).*fast-forward'\
+           "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
         RET="FAIL"; else RET="SYNC"; fi
     elif [ "_$TYPE" = "_BARE" ]; then
       #
@@ -1099,7 +1110,8 @@ synchronize_similar_repos() {
           1>> "${TEMPDIR}/gitstdout" 2> "${TEMPDIR}/gitstderr"
       fi
       # git pull will fail if not fast-forward
-      if [ `grep "\(fatal\|rejected\).*fast-forward" "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
+      if [ `grep '\(fatal\|rejected\).*fast-forward'\
+           "${TEMPDIR}/gitstderr"|wc -l` -gt 0 ]; then
         RET="FAIL"; else RET="SYNC"; fi
     fi
   done < "${TEMPLINE}/sort"
@@ -1120,15 +1132,13 @@ compare_repos() {
     # before and after synchronization, and for each
     # abstract (common) repo.
     #
-    if [ -d "${TEMPLINE}" ]; then
-         rm -rf "${TEMPLINE}"/*
-    else mkdir -p "${TEMPLINE}"
-    fi
+    [ -d "${TEMPLINE}" ]\
+      && rm -rf "${TEMPLINE}"/* \
+      || mkdir -p "${TEMPLINE}"
 
-    if [ -d "${TEMPLINEDATA}" ]; then
-         rm -rf "${TEMPLINEDATA}"/*
-    else mkdir -p "${TEMPLINEDATA}"
-    fi
+    [ -d "${TEMPLINEDATA}" ]\
+      && rm -rf "${TEMPLINEDATA}"/* \
+      || mkdir -p "${TEMPLINEDATA}"
 
     #
     # report a single log status line for all similar repos
@@ -1137,9 +1147,7 @@ compare_repos() {
     # cry z my/repo 12:0:y > 10:3:c > 9:0:r,z
     #
     summarize_similar_repos "$repo" "NoSync"
-    if [ "_$QUIET" = "_NO" ]; then echo "$RET"
-    else PREVLINE=$RET
-    fi
+    [ "_$QUIET" = "_NO" ] && echo "$RET" || PREVLINE=$RET
 
     #
     # synchronize any clean (not status lines:
@@ -1151,7 +1159,7 @@ compare_repos() {
     #
     synchronize_similar_repos "$repo"
     if [ "_$RET" = "_SYNC" -o "_$RET" = "_FAIL" ]; then
-      if [ "_$QUIET" = "_YES" ]; then echo $PREVLINE ; fi
+      [ "_$QUIET" = "_YES" ] && echo $PREVLINE
       rm -rf "${TEMPLINE}"/* "${TEMPLINEDATA}"/*
       #
       # if there was any synchronization,
@@ -1190,25 +1198,20 @@ update_list() {
   # have not synched and reported the entire list, we'll
   # purge the saved .latest
   #
-  if [ -r "${LISTDIR}/.latest" ]; then
-    rm "${LISTDIR}/.latest"
-  fi
+  [ -r "${LISTDIR}/.latest" ] && rm "${LISTDIR}/.latest"
 
   #
   # if partial synch, then we return without
   # overwriting any of the full data samples
   #
-  if [ "_$TARGET_REPO" != "_" ]; then
-     return;
-  fi
+  [ -n "$TARGET_REPO" ] && return;
 
   #
   # move the new temp data, overwriting only files (devices)
   # that have been recently updated, if there are any at all
   #
-  if [ `ls "${TEMPDATA}"|wc -l` != "0" ]; then
+  [ `ls "${TEMPDATA}"|wc -l` -gt 0 ] &&\
     mv -f "${TEMPDATA}"/* "${LISTDIR}"
-  fi
 }
 
 ############################################################
@@ -1240,10 +1243,9 @@ list_global() {
       "${TEMPDIR}/abstractrepos"
 
   while read repo; do
-    if [ -d "${TEMPLINE}" ]; then
-         rm -rf "${TEMPLINE}"/*
-    else mkdir -p "${TEMPLINE}"
-    fi
+    [ -d "${TEMPLINE}" ]\
+      && rm -rf "${TEMPLINE}"/* \
+      || mkdir -p "${TEMPLINE}"
 
     summarize_precomputed_repos "$repo"
     echo "$RET" | tee -a "${LISTDIR}/.latest"
